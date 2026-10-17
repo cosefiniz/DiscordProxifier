@@ -25,9 +25,8 @@ foreach ($f in 'Tor.zip', 'gost.exe', 'wgcf.exe', 'wireproxy.exe', 'DllVer', 'x6
     Copy-Item (Join-Path $root "dist\$f") $dst
 }
 
+. (Join-Path $PSScriptRoot 'zip-helper.ps1')
 $zip = Join-Path $out "$name.zip"
-if (Test-Path $zip) { Remove-Item $zip }
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-[IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [IO.Compression.CompressionLevel]::Optimal, $true)
+New-PortableZip $stage $zip "$name/"
 Remove-Item $stage -Recurse -Force
 Write-Host "Package: $zip"

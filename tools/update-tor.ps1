@@ -38,10 +38,8 @@ try {
     Copy-Item (Join-Path $tmp 'tor\tor.exe') $stage
     Get-ChildItem (Join-Path $tmp 'tor\pluggable_transports') -Filter *.exe | Copy-Item -Destination (Join-Path $stage 'PluggableTransports')
 
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $out = Join-Path $dist 'Tor.zip'
-    if (Test-Path $out) { Remove-Item $out }
-    [IO.Compression.ZipFile]::CreateFromDirectory($stage, $out, [IO.Compression.CompressionLevel]::Optimal, $false)
+    . (Join-Path $PSScriptRoot 'zip-helper.ps1')
+    New-PortableZip $stage (Join-Path $dist 'Tor.zip')
 } finally {
     Remove-Item $tmp -Recurse -Force
 }
