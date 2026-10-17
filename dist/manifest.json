@@ -1,0 +1,42 @@
+{
+    "appVersion":  "2.0.2",
+    "appDownload":  "https://github.com/cosefiniz/DiscordProxifier/releases/latest",
+    "files":  {
+                  "Tor.zip":  {
+                                  "version":  "0.4.9.13",
+                                  "sha256":  "9e1460483a5cb8ed7d87a77b0607bf9bc35191dce758c98c3e100fec21ce7709",
+                                  "size":  15341903,
+                                  "path":  "dist/Tor.zip"
+                              },
+                  "gost.exe":  {
+                                   "version":  "2.12.0",
+                                   "sha256":  "38fbf1cc4869947ebddd419b3ed0a84447db3401777237f3782b0682f6615987",
+                                   "size":  13279232,
+                                   "path":  "dist/gost.exe"
+                               },
+                  "wgcf.exe":  {
+                                   "version":  "2",
+                                   "sha256":  "47a874830eaf1b21fc061f3bc0c7fa735f1128a9dab305eb6cbf681bce2f082f",
+                                   "size":  9681920,
+                                   "path":  "dist/wgcf.exe"
+                               },
+                  "wireproxy.exe":  {
+                                        "version":  "1",
+                                        "sha256":  "001c5ca7d2642188962870e62c7d4e2992f3a5ed90d61e57295f07f31e255b11",
+                                        "size":  8223232,
+                                        "path":  "dist/wireproxy.exe"
+                                    },
+                  "x64/version.dll":  {
+                                          "version":  "v0.0.13",
+                                          "sha256":  "3b34158840883789a8e0ef5d001d9e9d51badd224f4c2d207ddcf278098aab97",
+                                          "size":  403968,
+                                          "path":  "dist/x64/version.dll"
+                                      },
+                  "x86/version.dll":  {
+                                          "version":  "v0.0.13",
+                                          "sha256":  "1252c8d19586efc0aae9a78af0677db6578217c26447ad8de9b1fef1c8fd00d9",
+                                          "size":  326656,
+                                          "path":  "dist/x86/version.dll"
+                                      }
+              }
+}
