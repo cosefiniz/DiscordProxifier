@@ -175,7 +175,13 @@ namespace DiscordUnblocker.Glass
                 canvas.Children.Add(blobs[i]);
             }
             SizeChanged += (s, e) => Place();
-            GlassTheme.Changed += () => ApplyTone(true);
+            Action retone = () => ApplyTone(true);
+            Loaded += (s, e) =>
+            {
+                GlassTheme.Changed += retone;
+                ApplyTone(false);
+            };
+            Unloaded += (s, e) => GlassTheme.Changed -= retone;
             ApplyTone(false);
         }
 

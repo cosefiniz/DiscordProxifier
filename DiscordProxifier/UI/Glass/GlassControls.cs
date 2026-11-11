@@ -28,7 +28,7 @@ namespace DiscordUnblocker.Glass
         public const string Close = "", Minimize = "", ToTray = "", Check = "",
             ChevronDown = "", ChevronRight = "", Bolt = "", Cloud = "", Globe = "",
             Settings = "", Logs = "", Test = "", Play = "", Refresh = "",
-            Folder = "", Link = "", Download = "", Info = "", Warning = "",
+            Folder = "", Link = "", Download = "", Info = "", Warning = "",
             Error = "", Copy = "", Repair = "", Report = "", Add = "", Search = "";
     }
 
@@ -200,6 +200,14 @@ namespace DiscordUnblocker.Glass
                 }
             };
             IsEnabledChanged += (s, e) => BeginAnimation(OpacityProperty, Motion.To(IsEnabled ? 1 : 0.45, 200, new QuadraticEase()));
+            // The primary glow follows the tone; subscribed only while shown so closed windows can go.
+            Action retone = () =>
+            {
+                if (kind == ButtonKind.Primary)
+                    Kind = kind;
+            };
+            Loaded += (s, e) => GlassTheme.Changed += retone;
+            Unloaded += (s, e) => GlassTheme.Changed -= retone;
         }
 
         public string Text
@@ -328,7 +336,12 @@ namespace DiscordUnblocker.Glass
             }
             SetColumnSpan(pill, Math.Max(1, items.Length));
             lane.SizeChanged += (s, e) => PlacePill(false);
-            GlassTheme.Changed += UpdatePillShadow;
+            Loaded += (s, e) =>
+            {
+                GlassTheme.Changed += UpdatePillShadow;
+                UpdatePillShadow();
+            };
+            Unloaded += (s, e) => GlassTheme.Changed -= UpdatePillShadow;
             UpdatePillShadow();
         }
 
