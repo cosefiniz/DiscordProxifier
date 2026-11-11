@@ -1,4 +1,4 @@
-# Discord Proxifier v2
+# Discord Proxifier
 
 Makes the Discord desktop app work where Discord is blocked, using one of three routes: **Direct**, **Cloudflare WARP** or **Tor**. Voice, video and streaming keep going direct.
 
@@ -17,6 +17,8 @@ Based on [s0rp/DiscordProxifier](https://github.com/s0rp/DiscordProxifier), whic
 
 With **Pick the fastest working route** on (default), the app tries Direct, then WARP, then Tor, and remembers what worked. It reconnects by itself after sleep, a network change or a dropped connection, and on Tor it asks for a new exit when Discord refuses the current one. Language: English or Türkçe in Settings.
 
+**Look (v3).** The app uses the **Liquid Glass** style: translucent glass panes over a softly moving background. In **Settings → Appearance** you can pick the background tone (**Light**, **Mixed** or **Dark**, changes right away) or switch back to the **Classic** look of 2.x (the app restarts). Nothing extra needs to be installed. The background only moves while you use the window, so the app costs no CPU when idle or in the tray. With Windows' transparency effects off, the glass becomes solid.
+
 ## Kullanım (TR)
 
 1. [Releases](../../releases/latest) sayfasından zip'i indirip bir klasöre çıkarın.
@@ -29,6 +31,8 @@ With **Pick the fastest working route** on (default), the app tries Direct, then
 | **Tor** | Tor ağı | daha yavaş; hemen her yerde çalışır |
 
 **Çalışan en hızlı yolu otomatik seç** açıkken (varsayılan) uygulama önce Doğrudan'ı, sonra WARP'ı, sonra Tor'u dener ve çalışanı hatırlar. Uykudan uyanınca, ağ değişince ya da bağlantı koptuğunda kendiliğinden yeniden bağlanır; Tor'da Discord çıkış noktasını reddederse yenisini ister. Dil Ayarlar'dan Türkçe yapılabilir.
+
+**Görünüm (v3).** Uygulama **Liquid Glass** stilini kullanır: yavaşça hareket eden bir arka plan üzerinde yarı saydam cam paneller. **Ayarlar → Görünüm**'den arka plan tonunu seçebilirsiniz (**Açık**, **Karışık** veya **Koyu**; hemen değişir) ya da 2.x'teki **Klasik** görünüme dönebilirsiniz (uygulama yeniden başlar). Ek bir şey kurmanız gerekmez. Arka plan yalnızca pencereyi kullanırken hareket eder; uygulama boştayken ya da tepsideyken işlemci harcamaz. Windows'ta saydamlık efektleri kapalıysa cam düz renge döner.
 
 ## If Windows Security or your antivirus blocks it
 
