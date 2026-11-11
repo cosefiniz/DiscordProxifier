@@ -246,9 +246,9 @@ namespace DiscordUnblocker.Glass
                 var ease = new SineEase { EasingMode = EasingMode.EaseInOut };
                 var ax = new DoubleAnimation(Layout[i, 3] * w, TimeSpan.FromSeconds(secs)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease };
                 var ay = new DoubleAnimation(Layout[i, 4] * h, TimeSpan.FromSeconds(secs * 1.27)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease };
-                // The drift is slow; 20 frames a second looks the same and costs a third.
-                Timeline.SetDesiredFrameRate(ax, 20);
-                Timeline.SetDesiredFrameRate(ay, 20);
+                // The drift is slow; 15 frames a second looks the same and costs a quarter.
+                Timeline.SetDesiredFrameRate(ax, 15);
+                Timeline.SetDesiredFrameRate(ay, 15);
                 moves[i].BeginAnimation(TranslateTransform.XProperty, ax, HandoffBehavior.SnapshotAndReplace);
                 moves[i].BeginAnimation(TranslateTransform.YProperty, ay, HandoffBehavior.SnapshotAndReplace);
             }

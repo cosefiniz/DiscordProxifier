@@ -29,6 +29,11 @@ namespace DiscordUnblocker.Glass
         protected readonly TextBlock TitleBlock;
         protected readonly GlassButton CloseButton;
         public bool CloseOnEscape { get; set; }
+        // The backdrop drifts only while the user is around: active window and input within
+        // the last few seconds. A window left open in front stops moving and costs nothing.
+        static readonly TimeSpan DriftAfterInput = TimeSpan.FromSeconds(12);
+        DateTime lastInput = DateTime.Now;
+        readonly System.Windows.Threading.DispatcherTimer idleTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         static BitmapImage logo;
 
         public GlassWindow(double contentWidth, bool showLogo = false, string title = "Discord Proxifier")
@@ -90,7 +95,11 @@ namespace DiscordUnblocker.Glass
             ApplyShadow();
             Content = outer;
 
-            Activated += (s, e) => UpdateMotion();
+            Activated += (s, e) =>
+            {
+                lastInput = DateTime.Now; // coming to the front counts as the user being here
+                UpdateMotion();
+            };
             Deactivated += (s, e) => UpdateMotion();
             IsVisibleChanged += (s, e) =>
             {
@@ -99,6 +108,11 @@ namespace DiscordUnblocker.Glass
                     PlayOpen();
             };
             StateChanged += (s, e) => UpdateMotion();
+            PreviewMouseMove += (s, e) => Touch();
+            PreviewMouseDown += (s, e) => Touch();
+            PreviewKeyDown += (s, e) => Touch();
+            idleTimer.Tick += (s, e) => UpdateMotion();
+            Closed += (s, e) => idleTimer.Stop();
             KeyDown += (s, e) =>
             {
                 if (CloseOnEscape && e.Key == Key.Escape)
@@ -170,9 +184,22 @@ namespace DiscordUnblocker.Glass
             };
         }
 
+        void Touch()
+        {
+            lastInput = DateTime.Now;
+            if (!BackdropLayer.Moving)
+                UpdateMotion();
+        }
+
         void UpdateMotion()
         {
-            BackdropLayer.Moving = IsVisible && IsActive && WindowState != WindowState.Minimized;
+            bool shown = IsVisible && IsActive && WindowState != WindowState.Minimized;
+            BackdropLayer.Moving = shown && DateTime.Now - lastInput < DriftAfterInput;
+            // The 1 s check only runs while there is something to stop.
+            if (BackdropLayer.Moving)
+                idleTimer.Start();
+            else
+                idleTimer.Stop();
         }
 
         void PlayOpen()
