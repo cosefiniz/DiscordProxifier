@@ -181,6 +181,10 @@
     <Reference Include="System.Deployment" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System.Xaml" />
     <Reference Include="System.Xml" />
     <Reference Include="System.Xml.ReaderWriter, Version=4.1.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
       <HintPath>..\packages\System.Xml.ReaderWriter.4.3.0\lib\net46\System.Xml.ReaderWriter.dll</HintPath>
@@ -189,7 +193,10 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="App\AppController.cs" />
+    <Compile Include="App\TrayIcon.cs" />
     <Compile Include="Core\AppSetup.cs" />
+    <Compile Include="Core\Strings.Glass.cs" />
     <Compile Include="Core\Configuration.cs" />
     <Compile Include="Core\DirectBackend.cs" />
     <Compile Include="Core\Diagnostics.cs" />
@@ -216,9 +223,26 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="UI\Theme.cs" />
+    <Compile Include="UI\Glass\GlassApp.cs" />
+    <Compile Include="UI\Glass\GlassCard.cs" />
+    <Compile Include="UI\Glass\GlassControls.cs" />
+    <Compile Include="UI\Glass\GlassDialog.cs" />
+    <Compile Include="UI\Glass\GlassLogsWindow.cs" />
+    <Compile Include="UI\Glass\GlassMainWindow.cs" />
+    <Compile Include="UI\Glass\GlassMenu.cs" />
+    <Compile Include="UI\Glass\GlassRepairWindow.cs" />
+    <Compile Include="UI\Glass\GlassSettingsWindow.cs" />
+    <Compile Include="UI\Glass\GlassSurface.cs" />
+    <Compile Include="UI\Glass\GlassTheme.cs" />
+    <Compile Include="UI\Glass\GlassToast.cs" />
+    <Compile Include="UI\Glass\GlassWindow.cs" />
+    <Compile Include="UI\Glass\Strings.GlassMain.cs" />
+    <Compile Include="UI\Glass\Strings.GlassWindows.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Assets\logo.png" />
+    <EmbeddedResource Include="Assets\Shaders\Refraction.ps" />
+    <None Include="Assets\Shaders\Refraction.fx" />
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>

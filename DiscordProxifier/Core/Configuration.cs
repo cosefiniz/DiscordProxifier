@@ -18,6 +18,11 @@ namespace DiscordUnblocker
         public string SelectedClient { get; set; } // DiscordClient.Key
         public string[] CustomClientRoots { get; set; } = new string[0];
 
+        // Look: "glass" (Liquid Glass, WPF) or "classic" (the 2.x WinForms windows).
+        public string Appearance { get; set; } = "glass";
+        // Liquid Glass background tone: "light", "mixed" or "dark".
+        public string GlassTone { get; set; } = "dark";
+
         // Proxy chain
         public string Mode { get; set; } = "Tor";
         public string MainProxyPort { get; set; } = "42213";
@@ -51,6 +56,10 @@ namespace DiscordUnblocker
                 c.GostPort = "42212";
             if (c.Language != "tr")
                 c.Language = "en";
+            if (c.Appearance != "classic")
+                c.Appearance = "glass";
+            if (c.GlassTone != "light" && c.GlassTone != "mixed")
+                c.GlassTone = "dark";
             c.CustomClientRoots = c.CustomClientRoots ?? new string[0];
             return c;
         }

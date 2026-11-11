@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Threading.Tasks;
@@ -8,42 +6,13 @@ using System.Windows.Forms;
 
 namespace DiscordUnblocker
 {
-    public class MainWindow : BorderlessWindow
+    // The classic look (WinForms). All behaviour lives in AppController; this window only shows it.
+    public class MainWindow : BorderlessWindow, IAppView
     {
+        readonly AppController app;
         readonly Configuration cfg;
-        readonly Logger logger;
-        readonly ProxyManager proxy;
-        readonly DiscordClients discord;
-        readonly Updater updater;
-        ManifestFile pendingUpdate;
-        string updateDismissedFor; // the user closed the card for this version: don't show it again
-        string updateBalloonFor;   // tray balloon already shown for this version
-        string torUpdateNotified;
-        DateTime nextUpdateCheck = DateTime.MaxValue;
-        DateTime lastUpdateCheck = DateTime.MinValue;
-        bool updateChecking;
-
-        // Set by Program when this process was started by a self-update.
-        public bool JustUpdated { get; set; }
-        List<DiscordClient> clients = new List<DiscordClient>();
-        DiscordClient selected;
-        ClientState clientState = ClientState.Stopped;
-        ProxyMode mode;
         bool startHidden;
         bool initialized;
-        bool exiting;
-        int tick;
-        bool polling;
-
-        // Watchdog: periodic health checks, plus a check shortly after resume / network change.
-        DateTime nextHealthCheck = DateTime.MaxValue;
-        DateTime pendingCheck = DateTime.MaxValue;
-        string pendingReason;
-        bool checking;
-        int healthFails;
-        DateTime lastReconnect = DateTime.MinValue;
-        bool lastConnectFailed;
-        DateTime nextDirectCheck = DateTime.MaxValue;
 
         // Title bar
         readonly FlatButton trayButton, minButton;
@@ -72,27 +41,19 @@ namespace DiscordUnblocker
         readonly ErrorCard errorCard;
         readonly FlatButton testButton, logsButton, settingsButton;
         readonly Toast toast;
-        readonly NotifyIcon tray;
-        readonly ContextMenuStrip trayMenu;
-        readonly ToolStripMenuItem trayStatus, trayConnect, traySwitch, trayLaunch, trayShow, trayExit;
         readonly Timer timer;
         LogsWindow logsWindow;
 
-        public MainWindow(Configuration cfg, Logger logger, bool startHidden)
+        public MainWindow(AppController app, bool startHidden)
         {
-            this.cfg = cfg;
-            this.logger = logger;
+            this.app = app;
+            cfg = app.Config;
             this.startHidden = startHidden;
-            mode = ProxyModes.Parse(cfg.Mode);
-            proxy = new ProxyManager(logger, AppSetup.DataDir);
-            proxy.FellBackToTor += () => Notify(Toast.Kind.Warning, L.T("toast.fallback"), null);
-            discord = new DiscordClients(logger, AppSetup.DataDir);
-            updater = new Updater(logger, AppSetup.DataDir);
             Subtitle = "v" + AppSetup.AppVersion;
             Text = "Discord Proxifier";
 
             trayButton = TitleButton(Theme.Glyph.ToTray);
-            trayButton.Click += (s, e) => HideToTray();
+            trayButton.Click += (s, e) => app.HideToTray();
             minButton = TitleButton(Theme.Glyph.Minimize);
             minButton.Click += (s, e) => WindowState = FormWindowState.Minimized;
 
@@ -103,7 +64,7 @@ namespace DiscordUnblocker
             statusTitle = new TextLine { Font = Theme.Status, BackColor = Theme.Surface, Height = Theme.S(30) };
             statusSub = new TextLine { Font = Theme.Small, ForeColor = Theme.TextMuted, BackColor = Theme.Surface };
             connectButton = new FlatButton { Primary = true, BackColor = Theme.Surface, Height = Theme.S(32) };
-            connectButton.Click += async (s, e) => await ConnectButtonClicked();
+            connectButton.Click += async (s, e) => await app.ConnectButtonClicked();
             progress = new ProgressLine { BackColor = Theme.Surface };
             statusCard.Controls.AddRange(new Control[] { dot, statusTitle, statusSub, connectButton, progress });
 
@@ -114,26 +75,22 @@ namespace DiscordUnblocker
                 Glyphs = new[] { Theme.Glyph.Bolt, Theme.Glyph.Cloud, Theme.Glyph.Globe },
                 Labels = ProxyModes.All.Select(ProxyModes.Display).ToArray()
             };
-            route.SetIndex(ProxyModes.Index(mode), false);
-            route.UserChanged += async i => await ModeChosen(ProxyModes.All[i]);
+            route.SetIndex(ProxyModes.Index(app.Mode), false);
+            route.UserChanged += async i => await app.ModeChosen(ProxyModes.All[i]);
             routeHint = new TextLine { Font = Theme.Small, ForeColor = Theme.TextFaint, Height = Theme.S(18) };
             autoConnect = new ToggleSwitch { Checked = cfg.AutoConnect };
             autoConnect.CheckedChanged += (s, e) =>
             {
-                cfg.AutoConnect = autoConnect.Checked;
-                cfg.Save();
+                if (autoConnect.Checked != cfg.AutoConnect)
+                    app.SetAutoConnect(autoConnect.Checked);
             };
             autoRoute = new ToggleSwitch { Checked = cfg.AutoRoute };
             autoRoute.CheckedChanged += (s, e) =>
             {
-                cfg.AutoRoute = autoRoute.Checked;
-                cfg.Save();
-                RefreshStatus();
+                if (autoRoute.Checked != cfg.AutoRoute)
+                    app.SetAutoRoute(autoRoute.Checked);
             };
             Controls.AddRange(new Control[] { routeLabel, route, routeHint, autoRoute, autoConnect });
-
-            Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
-            System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += OnNetworkChanged;
 
             // Discord card
             discordCard = new Card();
@@ -145,74 +102,38 @@ namespace DiscordUnblocker
             changeButton = new FlatButton { Glyph = Theme.Glyph.ChevronDown, Font = Theme.Small, BackColor = Theme.Surface, Height = Theme.S(28) };
             changeButton.Click += (s, e) => ShowClientMenu();
             launchButton = new FlatButton { Glyph = Theme.Glyph.Play, Primary = true, BackColor = Theme.Surface, Height = Theme.S(32) };
-            launchButton.Click += async (s, e) => await LaunchSelected();
+            launchButton.Click += async (s, e) => await app.LaunchSelected();
             shortcutToggle = new ToggleSwitch { BackColor = Theme.Surface, Font = Theme.Small };
             shortcutToggle.CheckedChanged += (s, e) =>
             {
-                if (selected != null)
-                    discord.SetShortcutProxy(selected, shortcutToggle.Checked, cfg.GostPort);
+                if (app.Selected != null && shortcutToggle.Checked != app.Selected.ShortcutProxied)
+                    app.SetShortcutProxy(shortcutToggle.Checked);
             };
             discordCard.Controls.AddRange(new Control[] { discordLabel, clientName, clientDot, clientStateText, changeButton, launchButton, shortcutToggle });
             clientMenu = new ContextMenuStrip { Renderer = new DarkMenuRenderer(), ShowImageMargin = true, Font = Theme.Body };
 
             // Error card
             errorCard = new ErrorCard();
-            errorCard.ActionLabel = a => a == ErrorAction.SwitchMode
-                ? L.F("action.SwitchMode", ProxyModes.Display(ProxyModes.Next(mode)))
-                : L.T("action." + a);
+            errorCard.ActionLabel = app.ActionLabel;
             errorCard.HeightChanging += DoLayout;
-            errorCard.ActionClicked += async a => await RunAction(a);
-            errorCard.Dismissed += () =>
-            {
-                if (errorCard.LastDismissed != null && errorCard.LastDismissed.Code == "UPDATE")
-                    updateDismissedFor = errorCard.LastDismissed.Arg;
-                proxy.ClearError();
-                RefreshStatus();
-            };
+            errorCard.ActionClicked += async a => await app.RunAction(a);
+            errorCard.Dismissed += () => app.OnCardDismissed(errorCard.LastDismissed);
             Controls.Add(errorCard);
 
             // Bottom bar
             testButton = new FlatButton { Glyph = Theme.Glyph.Test, Font = Theme.Small };
-            testButton.Click += async (s, e) => await RunTest();
+            testButton.Click += async (s, e) => await app.RunTest();
             logsButton = new FlatButton { Glyph = Theme.Glyph.Logs, Font = Theme.Small };
-            logsButton.Click += (s, e) => OpenLogs();
+            logsButton.Click += (s, e) => ShowLogs();
             settingsButton = new FlatButton { Glyph = Theme.Glyph.Settings, Font = Theme.Small };
-            settingsButton.Click += (s, e) => OpenSettings(null);
+            settingsButton.Click += (s, e) => app.OpenSettings(null);
             Controls.AddRange(new Control[] { testButton, logsButton, settingsButton });
 
             toast = new Toast();
             Controls.Add(toast);
 
-            // Tray
-            trayStatus = new ToolStripMenuItem { Enabled = false };
-            trayConnect = new ToolStripMenuItem();
-            trayConnect.Click += async (s, e) => await ConnectButtonClicked();
-            traySwitch = new ToolStripMenuItem();
-            traySwitch.Click += async (s, e) =>
-            {
-                ProxyMode target = ProxyModes.Next(mode);
-                route.SetIndex(ProxyModes.Index(target), true);
-                await ModeChosen(target);
-            };
-            trayLaunch = new ToolStripMenuItem();
-            trayLaunch.Click += async (s, e) => await LaunchSelected();
-            trayShow = new ToolStripMenuItem();
-            trayShow.Click += (s, e) => ShowFromTray();
-            trayExit = new ToolStripMenuItem();
-            trayExit.Click += (s, e) => ExitApp();
-            trayMenu = new ContextMenuStrip { Renderer = new DarkMenuRenderer(), Font = Theme.Body };
-            trayMenu.Items.AddRange(new ToolStripItem[] { trayStatus, new ToolStripSeparator(), trayConnect, traySwitch, trayLaunch, new ToolStripSeparator(), trayShow, trayExit });
-            tray = new NotifyIcon
-            {
-                Icon = new Icon(AppIcon, SystemInformation.SmallIconSize),
-                Text = "Discord Proxifier",
-                ContextMenuStrip = trayMenu,
-                Visible = true
-            };
-            tray.DoubleClick += (s, e) => ShowFromTray();
-
             timer = new Timer { Interval = 500 };
-            timer.Tick += (s, e) => OnTimer();
+            timer.Tick += (s, e) => app.Tick();
 
             L.Changed += ApplyTexts;
             ApplyTexts();
@@ -246,357 +167,115 @@ namespace DiscordUnblocker
             if (initialized)
                 return;
             initialized = true;
-            var clock = Stopwatch.StartNew();
-            logger.Log($"Discord Proxifier {AppSetup.AppVersion} starting");
-            proxy.KillOrphans();
-            Rescan();
+            app.Attach(this);
             timer.Start();
-            RefreshStatus();
-            AppSetup.SetAutoStart(cfg.OpenAtStartup, logger);
-
-            // Connect right away with the last used mode; nothing below waits on the network first.
-            List<string> missing = await AppSetup.PrepareLocalDataAsync(logger);
-            Task connecting = cfg.AutoConnect && missing.Count == 0 ? Connect() : null;
-            logger.Log($"Startup ready in {clock.ElapsedMilliseconds} ms");
-            if (JustUpdated)
-                Notify(Toast.Kind.Success, L.F("toast.updated", AppSetup.AppVersion), L.T("toast.updated.sub"));
-
-            await CheckUpdatesAsync(missing);
-            if (connecting != null)
-                await connecting;
-            else if (cfg.AutoConnect && !proxy.IsRunning && !proxy.IsStarting && (await AppSetup.PrepareLocalDataAsync(logger)).Count == 0)
-                await Connect();
+            await app.Init();
         }
 
-        // Background update check against our own repo: fills in missing files, updates
-        // version.dll automatically, and announces Tor / app updates (installed from Settings).
-        // Shows the update card for the pending version, but never over an error card: it waits
-        // until that card is gone (OnTimer calls this every tick). A card the user closed stays closed;
-        // one hidden for another reason (reconnect, an error) comes back.
-        void ShowPendingUpdate()
+        protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (pendingUpdate == null || updateDismissedFor == pendingUpdate.Version || errorCard.Visible || exiting)
-                return;
-            bool balloon = updateBalloonFor != pendingUpdate.Version;
-            updateBalloonFor = pendingUpdate.Version;
-            ShowError(AppError.For("UPDATE", pendingUpdate.Version), balloon);
+            app.OnViewClosing();
+            base.OnFormClosing(e);
         }
 
-        // While the app keeps running (tray, started with Windows) it checks again every 6 hours,
-        // and when the window is opened from the tray if the last check is over an hour old.
-        static readonly TimeSpan UpdateInterval = TimeSpan.FromHours(6);
-        static readonly TimeSpan UpdateRetryInterval = TimeSpan.FromMinutes(30);
+        // ---------------- IAppView ----------------
 
-        async Task PeriodicUpdateCheck()
+        public bool WindowVisible => Visible;
+        public bool IsShownToUser => Visible && WindowState != FormWindowState.Minimized;
+        public AppError Card => errorCard.Visible ? errorCard.Error : null;
+
+        public void ShowCard(AppError e)
         {
-            updateChecking = true;
-            try
-            {
-                logger.Log("Checking for updates");
-                await CheckUpdatesAsync(new List<string>());
-            }
-            finally
-            {
-                updateChecking = false;
-            }
+            errorCard.ShowError(e);
+            DoLayout();
         }
 
-        async Task CheckUpdatesAsync(List<string> missing)
+        public void HideCard(bool notify)
         {
-            lastUpdateCheck = DateTime.Now;
-            nextUpdateCheck = DateTime.Now + UpdateInterval;
-            Manifest m = await updater.FetchManifestAsync();
-            if (m == null)
-            {
-                // Offline (e.g. started with Windows before the network was up): try again sooner.
-                nextUpdateCheck = DateTime.Now + UpdateRetryInterval;
-                if (missing.Count > 0)
-                    ShowError(missing.Contains("x64/version.dll") ? AppError.For("DP-502") : AppError.For("DP-103", missing[0]));
-                return;
-            }
-            if (missing.Count > 0)
-                await updater.EnsureFilesAsync(m);
-            bool dllUpdated = await updater.UpdateDllAsync(m);
-            if (!AppSetup.HasDll)
-                ShowError(AppError.For("DP-502"));
-
-            bool torUpdate = await Task.Run(() => updater.TorUpdateAvailable(m));
-            pendingUpdate = Updater.AppUpdate(m);
-            if (pendingUpdate != null)
-            {
-                ShowPendingUpdate(); // now, or as soon as the error card is gone
-            }
-            else if (Updater.IsNewer(m.AppVersion, AppSetup.AppVersion))
-                Notify(Toast.Kind.Info, L.F("toast.update.app", m.AppVersion), L.T("toast.update.sub"));
-            else if (torUpdate && torUpdateNotified != m.Get("Tor.zip")?.Version)
-            {
-                torUpdateNotified = m.Get("Tor.zip")?.Version;
-                Notify(Toast.Kind.Info, L.T("toast.update.tor"), L.T("toast.update.sub"));
-            }
-            else if (dllUpdated)
-                Notify(Toast.Kind.Info, L.F("toast.dll.updated", updater.InstalledDllVersion), null);
+            errorCard.Collapse(notify);
         }
 
-        // Settings → Update Tor. Stops Tor if it is the active backend, swaps the files, reconnects.
-        async Task<string> UpdateTor()
+        public void ShowToast(NoteKind kind, string title, string sub)
         {
-            if (!UpdateSource.Configured)
-                return L.T("update.notconfigured");
-            Manifest m = await updater.FetchManifestAsync();
-            if (m == null)
-                return L.T("update.offline");
-            if (!await Task.Run(() => updater.TorUpdateAvailable(m)))
-                return L.T("update.latest");
-            string version = m.Get("Tor.zip").Version;
-            string zip = await updater.DownloadTorAsync(m);
-            if (zip == null)
-                return L.T("update.failed");
-            bool torActive = (proxy.IsRunning || proxy.IsStarting) && mode == ProxyMode.Tor;
-            if (torActive)
-                await proxy.StopAsync();
-            bool ok = await Task.Run(() => updater.InstallTorZip(zip, version));
-            if (torActive)
-                _ = Connect();
-            RefreshStatus();
-            return ok ? L.F("update.done", version) : L.T("update.failed");
+            Toast.Kind k = kind == NoteKind.Success ? Toast.Kind.Success : kind == NoteKind.Warning ? Toast.Kind.Warning : kind == NoteKind.Error ? Toast.Kind.Error : Toast.Kind.Info;
+            toast.ShowToast(k, title, sub);
         }
 
-        // Settings → Check for updates. Opens the download page when a newer build exists.
-        async Task<string> CheckAppUpdate()
+        public void ModeChanged(bool animate)
         {
-            if (!UpdateSource.Configured)
-                return L.T("update.notconfigured");
-            Manifest m = await updater.FetchManifestAsync();
-            if (m == null)
-                return L.T("update.offline");
-            bool dll = await updater.UpdateDllAsync(m);
-            if (!Updater.IsNewer(m.AppVersion, AppSetup.AppVersion))
-                return dll ? L.F("toast.dll.updated", updater.InstalledDllVersion) : L.T("update.latest");
-            ManifestFile exe = Updater.AppUpdate(m);
-            if (exe != null)
-            {
-                if (MessageBox.Show(L.F("update.confirm", exe.Version), "Discord Proxifier", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-                    return L.F("UPDATE.t", exe.Version);
-                await InstallUpdateAsync(exe);
-                return L.T("update.install.failed"); // only reached when the install didn't restart the app
-            }
-            try
-            {
-                Process.Start(string.IsNullOrEmpty(m.AppDownload) ? UpdateSource.ReleasesPage : m.AppDownload);
-            }
-            catch { }
-            return L.F("update.available", m.AppVersion);
+            route.SetIndex(ProxyModes.Index(app.Mode), animate);
         }
 
-        // Downloads, verifies and installs the new exe, then restarts into it. On any failure the
-        // running version keeps working and the download page opens instead.
-        async Task InstallUpdateAsync(ManifestFile f)
+        public bool Confirm(string title, string body)
         {
-            Notify(Toast.Kind.Info, L.T("toast.updating"), L.F("UPDATE.t", f.Version));
-            string newExe = await updater.DownloadAppAsync(f);
-            if (newExe != null)
-            {
-                bool wasHidden = !Visible;
-                exiting = true;
-                proxy.StopNow();
-                if (updater.SwapAndRestart(newExe, wasHidden))
-                {
-                    tray.Visible = false;
-                    Application.Exit();
-                    return;
-                }
-                exiting = false;
-                await Connect();
-            }
-            Notify(Toast.Kind.Error, L.T("update.install.failed"), L.T("update.install.failed.sub"));
-            try
-            {
-                Process.Start(UpdateSource.ReleasesPage);
-            }
-            catch { }
+            return MessageBox.Show(this, body, title, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
         }
 
-        // Settings → Repair: checks and fixes files, leftovers, Discord and the connection,
-        // showing each step live.
-        async Task RunRepairAsync(RepairWindow w)
+        public string PickFolder(string description, string startPath)
         {
-            bool allGood = true;
-            Action<int, int, string> done = (i, status, detail) =>
-            {
-                if (status != 0)
-                    allGood = false;
-                w.Done(i, status, detail);
-            };
-            logger.Log("Repair started");
-
-            // 1. Program files against the published checksums.
-            int s1 = w.Step(L.T("repair.files"));
-            List<string> missing = await AppSetup.PrepareLocalDataAsync(logger);
-            Manifest m = await updater.FetchManifestAsync();
-            if (m == null)
-            {
-                done(s1, missing.Count == 0 ? 1 : 2, missing.Count == 0 ? L.T("repair.files.unverified") : L.F("repair.files.missing", string.Join(", ", missing)));
-            }
-            else
-            {
-                List<string> bad = await Task.Run(() => updater.VerifyDataFiles(m));
-                if (bad.Count == 0)
-                {
-                    done(s1, 0, L.T("repair.files.ok"));
-                }
-                else
-                {
-                    if (proxy.IsRunning || proxy.IsStarting)
-                        await proxy.StopAsync(); // files in use can't be replaced
-                    var failed = new List<string>();
-                    foreach (string key in bad)
-                    {
-                        string target = System.IO.Path.Combine(AppSetup.DataDir, key.Replace('/', '\\'));
-                        bool ok = await updater.DownloadVerifiedAsync(m.Get(key), target);
-                        if (ok && key == "Tor.zip")
-                            ok = await Task.Run(() => updater.InstallTorZip(target, m.Get(key).Version));
-                        if (!ok)
-                            failed.Add(key);
-                    }
-                    done(s1, failed.Count == 0 ? 0 : 2, failed.Count == 0
-                        ? L.F("repair.files.fixed", bad.Count)
-                        : L.F("repair.files.failed", string.Join(", ", failed)));
-                }
-            }
-
-            // 2. tor/gost/wireproxy left behind by other copies.
-            int s2 = w.Step(L.T("repair.leftovers"));
-            int closed = 0;
-            foreach (Process p in proxy.FindForeignLeftovers())
-            {
-                try
-                {
-                    p.Kill();
-                    p.WaitForExit(3000);
-                    closed++;
-                }
-                catch { }
-                finally
-                {
-                    p.Dispose();
-                }
-            }
-            proxy.KillOrphans();
-            done(s2, 0, closed == 0 ? L.T("repair.leftovers.none") : L.F("repair.leftovers.closed", closed));
-
-            // 3. Discord install, proxy module, shortcuts.
-            int s3 = w.Step(L.T("repair.discord"));
-            Rescan();
-            bool restartDiscord = false;
-            if (selected == null)
-            {
-                done(s3, 2, L.T("client.none"));
-            }
-            else
-            {
-                DiscordClient c = selected;
-                bool killed = false;
-                bool ok = await Task.Run(() => discord.EnsureDll(c, out killed));
-                discord.FixProxifiedShortcuts(clients, cfg.GostPort);
-                restartDiscord = killed;
-                done(s3, ok ? 0 : 2, L.F(ok ? (killed ? "repair.discord.restarted" : "repair.discord.ok") : "repair.discord.failed", c.DisplayName));
-            }
-
-            // 4. The connection itself.
-            int s4 = w.Step(L.T("repair.conn"));
-            ProbeResult health = proxy.IsRunning ? await proxy.HealthCheckAsync() : null;
-            if (health == null || !health.Ok)
-                await Connect();
-            if (proxy.IsRunning)
-                done(s4, 0, L.F("repair.conn.ok", ProxyModes.Display(mode)));
-            else
-                done(s4, 2, L.T("repair.conn.failed"));
-            if (restartDiscord && proxy.IsRunning)
-                await LaunchSelected();
-
-            logger.Log("Repair finished" + (allGood ? "" : " with problems"));
-            w.Finish(allGood);
+            using (var dlg = new FolderBrowserDialog { Description = description, ShowNewFolderButton = false, SelectedPath = startPath })
+                return dlg.ShowDialog(this) == DialogResult.OK ? dlg.SelectedPath : null;
         }
 
-        async Task OpenRepair()
+        public void ShowSettings(string focus)
+        {
+            using (var w = new SettingsWindow(cfg, app.Logger, focus)
+            {
+                TorVersion = app.TorVersion,
+                TorUpdate = app.UpdateTor,
+                AppUpdate = app.CheckAppUpdate,
+                Repair = app.OpenRepair,
+                Report = app.CreateReport,
+                SwitchAppearance = app.SwitchAppearance
+            })
+                w.ShowDialog(this);
+        }
+
+        public async Task ShowRepairAsync(Func<IRepairView, Task> run)
         {
             using (var w = new RepairWindow())
             {
                 w.ReportClicked = async b =>
                 {
                     b.Enabled = false;
-                    string result = await CreateReport();
+                    string result = await app.CreateReport();
                     b.Text = result;
                     b.Width = b.PreferredWidth();
                 };
-                w.Shown += async (s, e) => await RunRepairAsync(w);
+                w.Shown += async (s, e) => await run(w);
                 w.ShowDialog(this);
             }
             await Task.CompletedTask;
         }
 
-        // Writes the diagnostic report to the desktop and selects it in Explorer.
-        async Task<string> CreateReport()
+        public void ShowLogs()
         {
-            var ctx = new Diagnostics.Context
+            if (logsWindow == null || logsWindow.IsDisposed)
             {
-                Config = cfg,
-                Proxy = proxy,
-                Discord = discord,
-                Clients = clients,
-                Selected = selected,
-                Updater = updater,
-                Logger = logger
-            };
-            try
-            {
-                string text = await Task.Run(() => Diagnostics.BuildReportAsync(ctx));
-                string path = Diagnostics.Save(text);
-                logger.Log("Diagnostic report saved: " + Diagnostics.Mask(path));
-                Process.Start("explorer.exe", "/select,\"" + path + "\"");
-                return L.T("report.saved");
+                logsWindow = new LogsWindow(app.Logger);
+                logsWindow.Show();
             }
-            catch (Exception ex)
+            else
             {
-                logger.Log("Could not create the report: " + ex.Message, LogType.ERROR);
-                return L.T("update.failed");
+                logsWindow.Activate();
             }
         }
 
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
-            System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
-            if (!exiting)
-            {
-                exiting = true;
-                proxy.StopNow();
-                tray.Visible = false;
-            }
-            base.OnFormClosing(e);
-        }
-
-        void ExitApp()
-        {
-            exiting = true;
-            proxy.StopNow();
-            tray.Visible = false;
-            Application.Exit();
-        }
-
-        void HideToTray()
-        {
-            Hide();
-            Notify(Toast.Kind.Info, L.T("toast.tray"), null);
-        }
-
-        void ShowFromTray()
+        public void ShowWindow()
         {
             Show();
             WindowState = FormWindowState.Normal;
             Activate();
-            if (DateTime.Now - lastUpdateCheck > TimeSpan.FromHours(1) && lastUpdateCheck != DateTime.MinValue)
-                nextUpdateCheck = DateTime.Now; // the timer picks it up
+        }
+
+        public void HideWindow()
+        {
+            Hide();
+        }
+
+        public void Shutdown()
+        {
+            Application.Exit();
         }
 
         // ---------------- layout and texts ----------------
@@ -614,9 +293,6 @@ namespace DiscordUnblocker
             testButton.Text = L.T("btn.test");
             logsButton.Text = L.T("btn.logs");
             settingsButton.Text = L.T("btn.settings");
-            trayShow.Text = L.T("tray.show");
-            trayLaunch.Text = L.T("tray.launch");
-            trayExit.Text = L.T("tray.exit");
             new ToolTip().SetToolTip(trayButton, L.T("tip.tray"));
             if (errorCard.Visible)
                 errorCard.Relayout();
@@ -698,542 +374,68 @@ namespace DiscordUnblocker
 
         // ---------------- status ----------------
 
-        void OnTimer()
+        public void RefreshStatus()
         {
-            RefreshStatus();
-            if (++tick % 6 == 0)
-                PollClient();
-            if (!checking && (DateTime.Now >= pendingCheck || DateTime.Now >= nextHealthCheck))
-                _ = WatchdogAsync();
-            if (!updateChecking && DateTime.Now >= nextUpdateCheck)
-                _ = PeriodicUpdateCheck();
-            ShowPendingUpdate();
-        }
-
-        void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
-        {
-            if (e.Mode == Microsoft.Win32.PowerModes.Resume && IsHandleCreated)
-                BeginInvoke(new Action(() => ScheduleCheck("reason.resume")));
-        }
-
-        void OnNetworkChanged(object sender, EventArgs e)
-        {
-            if (IsHandleCreated && !IsDisposed)
-                BeginInvoke(new Action(() => ScheduleCheck("reason.network")));
-        }
-
-        // Network events come in bursts; check once things have settled.
-        void ScheduleCheck(string reason)
-        {
-            pendingReason = reason;
-            pendingCheck = DateTime.Now.AddSeconds(6);
-        }
-
-        // Keeps the connection alive without the user noticing: reconnects when a part died,
-        // when two health checks in a row fail, or when a check after resume / network change
-        // fails. On Tor, a 403/429 from Discord only needs a new exit, not a reconnect.
-        async Task WatchdogAsync()
-        {
-            checking = true;
-            try
+            StatusInfo s = app.Status;
+            switch (s.Kind)
             {
-                bool triggered = DateTime.Now >= pendingCheck;
-                string reason = triggered ? pendingReason : null;
-                pendingCheck = DateTime.MaxValue;
-                nextHealthCheck = DateTime.Now.AddSeconds(60);
-                if (exiting || proxy.IsStarting)
-                    return;
-                if (!proxy.IsRunning)
-                {
-                    // A failed auto-connect gets another chance once the network changes.
-                    if (triggered && cfg.AutoConnect && lastConnectFailed)
-                        await Reconnect(reason);
-                    return;
-                }
-                if (proxy.DeadPart != null)
-                {
-                    await Reconnect("reason.dropped");
-                    return;
-                }
-                ProbeResult r = await proxy.HealthCheckAsync();
-                if (r == null || r.Ok)
-                {
-                    healthFails = 0;
-                    await TryUpgradeToDirect();
-                    return;
-                }
-                if (!await DirectBackend.InternetUpAsync())
-                {
-                    WaitForInternet(reason ?? "reason.dropped");
-                    return;
-                }
-                logger.Log("Watchdog: health check failed: " + r.Detail, LogType.WARNING);
-                if (proxy.ActiveMode == ProxyMode.Tor && (r.Status == 403 || r.Status == 429))
-                {
-                    if (await proxy.NewCircuitAsync())
-                        Notify(Toast.Kind.Info, L.T("toast.newcircuit"), L.T("toast.newcircuit.sub"));
-                    return;
-                }
-                if (triggered || ++healthFails >= 2)
-                {
-                    healthFails = 0;
-                    await Reconnect(reason ?? "reason.dropped");
-                }
-            }
-            finally
-            {
-                checking = false;
-            }
-        }
-
-        void WaitForInternet(string reasonKey)
-        {
-            logger.Log("Watchdog: no internet, waiting for the network");
-            pendingReason = reasonKey;
-            pendingCheck = DateTime.Now.AddSeconds(8);
-        }
-
-        // With the automatic route on a slower route (WARP/Tor), every few minutes check whether
-        // Direct works again and move back to it; a temporary outage shouldn't leave the app on Tor.
-        async Task TryUpgradeToDirect()
-        {
-            if (!cfg.AutoRoute || proxy.ActiveMode == ProxyMode.Direct || DateTime.Now < nextDirectCheck)
-                return;
-            nextDirectCheck = DateTime.Now.AddMinutes(10);
-            if (!await DirectBackend.WorksNowAsync(TimeSpan.FromSeconds(6)))
-                return;
-            logger.Log("Auto route: Direct works again, switching back");
-            SetMode(ProxyMode.Direct, true);
-            Task<bool> sw = proxy.SwitchModeAsync(ProxyMode.Direct, cfg);
-            RefreshStatus();
-            AfterStart(await sw, true);
-        }
-
-        async Task Reconnect(string reasonKey)
-        {
-            if (!await DirectBackend.InternetUpAsync())
-            {
-                WaitForInternet(reasonKey);
-                return;
-            }
-            if (DateTime.Now - lastReconnect < TimeSpan.FromSeconds(30))
-                return;
-            lastReconnect = DateTime.Now;
-            logger.Log($"Watchdog: reconnecting ({reasonKey})");
-            await Connect(reasonKey);
-        }
-
-        void RefreshStatus()
-        {
-            string modeName = ProxyModes.Display(mode);
-            AppError err = errorCard.Visible && errorCard.Error != null && !errorCard.Error.IsInfo ? errorCard.Error : null;
-            string title, sub;
-            if (proxy.IsStarting)
-            {
-                dot.Set(Theme.Warning, true);
-                title = L.T("status.connecting");
-                sub = proxy.Progress;
-                progress.Set(proxy.Percent >= 0 ? proxy.Percent / 100f : -1);
-                connectButton.Text = L.T("btn.cancel");
-                connectButton.Primary = false;
-            }
-            else if (proxy.IsRunning)
-            {
-                string dead = proxy.DeadPart;
-                if (dead != null)
-                {
-                    dot.Set(Theme.Danger, false);
-                    title = L.T("status.error");
-                    sub = L.F("status.sub.unhealthy", dead);
-                }
-                else
-                {
+                case StatusKind.Connecting:
+                    dot.Set(Theme.Warning, true);
+                    break;
+                case StatusKind.Connected:
                     dot.Set(Theme.Success, false);
-                    title = L.T("status.connected");
-                    sub = L.F("status.sub.connected", proxy.LastLatencyMs, modeName);
-                }
-                progress.Set(null);
-                connectButton.Text = L.T("btn.disconnect");
-                connectButton.Primary = false;
+                    break;
+                case StatusKind.Unhealthy:
+                case StatusKind.Failed:
+                    dot.Set(Theme.Danger, false);
+                    break;
+                default:
+                    dot.Set(Theme.Idle, false);
+                    break;
             }
-            else if (err != null)
-            {
-                dot.Set(Theme.Danger, false);
-                title = L.T("status.error");
-                sub = err.Title;
-                progress.Set(null);
-                connectButton.Text = L.T("btn.connect");
-                connectButton.Primary = true;
-            }
-            else
-            {
-                dot.Set(Theme.Idle, false);
-                title = L.T("status.down");
-                sub = L.T("status.sub.down");
-                progress.Set(null);
-                connectButton.Text = L.T("btn.connect");
-                connectButton.Primary = true;
-            }
-            statusTitle.Text = title;
-            statusSub.Text = sub;
-            route.Busy = proxy.IsStarting;
-            string hint = L.T(mode == ProxyMode.Warp ? "route.warp.hint" : mode == ProxyMode.Direct ? "route.direct.hint" : "route.tor.hint");
-            routeHint.Text = cfg.AutoRoute ? L.F("route.auto.hint", hint) : hint;
+            progress.Set(s.Progress);
+            connectButton.Text = s.ButtonText;
+            connectButton.Primary = s.ButtonPrimary;
+            statusTitle.Text = s.Title;
+            statusSub.Text = s.Sub;
+            route.Busy = s.Kind == StatusKind.Connecting;
+            routeHint.Text = s.RouteHint;
+            if (autoRoute.Checked != cfg.AutoRoute)
+                autoRoute.Checked = cfg.AutoRoute;
+            testButton.Enabled = !app.Testing;
             int want = Math.Max(Theme.S(104), connectButton.PreferredWidth());
             if (connectButton.Width != want)
                 DoLayout();
             connectButton.Invalidate();
-
-            trayStatus.Text = title + " · " + modeName;
-            trayConnect.Text = connectButton.Text;
-            traySwitch.Text = L.F("tray.switch", ProxyModes.Display(ProxyModes.Next(mode)));
-            traySwitch.Enabled = !proxy.IsStarting;
-            string tip = "Discord Proxifier · " + title;
-            tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
-        }
-
-        void Notify(Toast.Kind kind, string title, string sub)
-        {
-            if (Visible && WindowState != FormWindowState.Minimized)
-            {
-                toast.ShowToast(kind, title, sub);
-            }
-            else
-            {
-                ToolTipIcon icon = kind == Toast.Kind.Error ? ToolTipIcon.Error : kind == Toast.Kind.Warning ? ToolTipIcon.Warning : ToolTipIcon.Info;
-                tray.ShowBalloonTip(3000, title, string.IsNullOrEmpty(sub) ? " " : sub, icon);
-            }
-        }
-
-        void ShowError(AppError e, bool balloon = true)
-        {
-            errorCard.ShowError(e);
-            DoLayout();
-            RefreshStatus();
-            if (balloon && (!Visible || WindowState == FormWindowState.Minimized))
-            {
-                if (e.IsInfo)
-                    tray.ShowBalloonTip(5000, e.Title, e.Description, ToolTipIcon.Info);
-                else
-                    tray.ShowBalloonTip(5000, e.Code + " · " + e.Title, e.Description, ToolTipIcon.Error);
-            }
-        }
-
-        // ---------------- proxy ----------------
-
-        bool EnsureWarpConsent()
-        {
-            if (cfg.WarpTosAccepted || WarpBackend.HasAccount(AppSetup.DataDir))
-                return true;
-            DialogResult r = MessageBox.Show(this, L.T("warp.consent.body"), L.T("warp.consent.title"), MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (r != DialogResult.Yes)
-                return false;
-            cfg.WarpTosAccepted = true;
-            cfg.Save();
-            return true;
-        }
-
-        void SetMode(ProxyMode m, bool animate)
-        {
-            mode = m;
-            cfg.Mode = ProxyModes.ToConfig(m);
-            cfg.Save();
-            route.SetIndex(ProxyModes.Index(m), animate);
-        }
-
-        async Task ConnectButtonClicked()
-        {
-            if (proxy.IsStarting || proxy.IsRunning)
-            {
-                lastConnectFailed = false;
-                nextHealthCheck = DateTime.MaxValue;
-                await proxy.StopAsync();
-                if (!exiting)
-                {
-                    RefreshStatus();
-                    Notify(Toast.Kind.Info, L.T("toast.disconnected"), null);
-                }
-                return;
-            }
-            await Connect();
-        }
-
-        async Task Connect(string reconnectReason = null)
-        {
-            if (mode == ProxyMode.Warp && !EnsureWarpConsent())
-            {
-                SetMode(ProxyMode.Tor, true);
-                Notify(Toast.Kind.Warning, L.T("warp.consent.declined"), null);
-            }
-            errorCard.Collapse(false);
-            if (cfg.AutoRoute && mode != ProxyMode.Direct && await DirectBackend.WorksNowAsync(TimeSpan.FromSeconds(4)))
-            {
-                logger.Log("Auto route: Direct works on this network, trying it first");
-                SetMode(ProxyMode.Direct, false);
-            }
-            Task<bool> start = proxy.StartAsync(mode, cfg);
-            RefreshStatus();
-            bool ok = await start;
-            AfterStart(ok, false, reconnectReason);
-            if (ok && cfg.LaunchDiscordAfterConnect && selected != null && clientState != ClientState.RunningWithProxy)
-                await LaunchSelected();
-        }
-
-        async Task ModeChosen(ProxyMode target)
-        {
-            if (target == mode)
-                return;
-            if (target == ProxyMode.Warp && !EnsureWarpConsent())
-            {
-                route.SetIndex(ProxyModes.Index(mode), true);
-                Notify(Toast.Kind.Warning, L.T("warp.consent.declined"), null);
-                return;
-            }
-            if (cfg.AutoRoute)
-            {
-                cfg.AutoRoute = false;
-                autoRoute.Checked = false;
-                cfg.Save();
-                Notify(Toast.Kind.Info, L.T("toast.auto.off"), null);
-            }
-            SetMode(target, true);
-            RefreshStatus();
-            if (!proxy.IsRunning && !proxy.IsStarting)
-                return;
-            errorCard.Collapse(false);
-            Task<bool> sw = proxy.SwitchModeAsync(target, cfg);
-            RefreshStatus();
-            bool ok = await sw;
-            AfterStart(ok, true);
-        }
-
-        void AfterStart(bool ok, bool switched, string reconnectReason = null)
-        {
-            if (exiting)
-                return;
-            lastConnectFailed = !ok;
-            nextDirectCheck = DateTime.Now.AddMinutes(2);
-            nextHealthCheck = ok ? DateTime.Now.AddSeconds(60) : DateTime.MaxValue;
-            healthFails = 0;
-            bool moved = proxy.ActiveMode.HasValue && proxy.ActiveMode.Value != mode;
-            if (moved)
-                SetMode(proxy.ActiveMode.Value, true); // auto route, or WARP -> Tor fallback
-            RefreshStatus();
-            if (ok)
-            {
-                string m = ProxyModes.Display(mode);
-                if (reconnectReason != null)
-                    Notify(Toast.Kind.Info, L.F("toast.reconnected", m), L.T(reconnectReason));
-                else if (moved && cfg.AutoRoute)
-                    Notify(Toast.Kind.Info, L.F("toast.auto.picked", m), L.T("toast.auto.picked.sub"));
-                else if (switched)
-                    Notify(Toast.Kind.Success, L.F("toast.mode", m), L.T("toast.mode.sub"));
-                else
-                    Notify(Toast.Kind.Success, L.F("toast.connected", m), L.F("status.sub.connected", proxy.LastLatencyMs, m));
-            }
-            else if (proxy.LastError != null)
-            {
-                ShowError(proxy.LastError);
-            }
-        }
-
-        async Task RunAction(ErrorAction a)
-        {
-            switch (a)
-            {
-                case ErrorAction.Retry:
-                    await Connect();
-                    break;
-                case ErrorAction.NewCircuit:
-                    if (await proxy.NewCircuitAsync())
-                    {
-                        errorCard.Collapse();
-                        Notify(Toast.Kind.Info, L.T("toast.newcircuit"), null);
-                    }
-                    else
-                    {
-                        await Connect();
-                    }
-                    break;
-                case ErrorAction.SwitchMode:
-                    ProxyMode target = ProxyModes.Next(mode);
-                    if (target == ProxyMode.Warp && !EnsureWarpConsent())
-                        return;
-                    SetMode(target, true);
-                    await Connect();
-                    break;
-                case ErrorAction.OpenSettings:
-                    OpenSettings(null);
-                    break;
-                case ErrorAction.AddBridges:
-                    OpenSettings("bridges");
-                    break;
-                case ErrorAction.ChangeEndpoint:
-                    OpenSettings("endpoint");
-                    break;
-                case ErrorAction.KillLeftovers:
-                    int n = 0;
-                    foreach (Process p in proxy.FindForeignLeftovers())
-                    {
-                        try
-                        {
-                            logger.Log($"Closing leftover {p.ProcessName} (pid {p.Id})", LogType.WARNING);
-                            p.Kill();
-                            p.WaitForExit(3000);
-                            n++;
-                        }
-                        catch (Exception ex)
-                        {
-                            logger.Log($"Could not close pid {p.Id}: {ex.Message}", LogType.ERROR);
-                        }
-                        finally
-                        {
-                            p.Dispose();
-                        }
-                    }
-                    Notify(Toast.Kind.Info, L.F("toast.leftovers", n), null);
-                    await Connect();
-                    break;
-                case ErrorAction.OpenLogs:
-                    OpenLogs();
-                    break;
-                case ErrorAction.OpenFolder:
-                    Process.Start("explorer.exe", "\"" + AppContext.BaseDirectory + "\"");
-                    break;
-                case ErrorAction.BrowseDiscord:
-                    BrowseForDiscord();
-                    break;
-                case ErrorAction.RescanDiscord:
-                    Rescan();
-                    if (selected != null)
-                        errorCard.Collapse();
-                    break;
-                case ErrorAction.InstallUpdate:
-                    if (pendingUpdate != null)
-                        await InstallUpdateAsync(pendingUpdate);
-                    break;
-                case ErrorAction.ReleaseNotes:
-                    try
-                    {
-                        Process.Start(UpdateSource.ReleasesPage);
-                    }
-                    catch { }
-                    break;
-                case ErrorAction.Repair:
-                    errorCard.Collapse();
-                    await OpenRepair();
-                    break;
-                case ErrorAction.RetryDll:
-                    Manifest m = await updater.FetchManifestAsync();
-                    if (m != null)
-                        await updater.EnsureFilesAsync(m);
-                    if (AppSetup.HasDll)
-                        errorCard.Collapse();
-                    else
-                        Notify(Toast.Kind.Error, L.T("update.offline"), null);
-                    break;
-            }
-        }
-
-        async Task RunTest()
-        {
-            if (!proxy.IsRunning)
-            {
-                Notify(Toast.Kind.Info, L.T("toast.notconnected"), null);
-                return;
-            }
-            testButton.Enabled = false;
-            List<TestItem> items = await proxy.TestAsync();
-            testButton.Enabled = true;
-            Func<TestItem, string> fmt = i => i.Reachable ? i.Result.Ms + " ms" : (i.Result.Status > 0 ? "HTTP " + i.Result.Status : "✕");
-            string detail = string.Join(" · ", items.Select(i => L.T("test." + i.Name) + " " + fmt(i)));
-            TestItem bad = items.FirstOrDefault(i => !i.Reachable);
-            if (bad == null)
-            {
-                Notify(Toast.Kind.Success, L.T("toast.test.ok"), detail);
-                return;
-            }
-            int st = bad.Result.Status;
-            if (proxy.ActiveMode == ProxyMode.Tor && (st == 403 || st == 429) && await proxy.NewCircuitAsync())
-            {
-                Notify(Toast.Kind.Info, L.T("toast.newcircuit"), L.T("toast.newcircuit.sub"));
-                return;
-            }
-            Notify(Toast.Kind.Error, L.T("toast.test.fail"), detail);
-            ShowError(st == 403 || st == 429
-                ? AppError.For("DP-402", "HTTP " + st)
-                : AppError.For("DP-401", st > 0 ? "HTTP " + st : bad.Name));
         }
 
         // ---------------- Discord client ----------------
 
-        void Rescan()
-        {
-            clients = discord.Scan(cfg.CustomClientRoots);
-            logger.Log($"Discord installs found: {(clients.Count == 0 ? "none" : string.Join(", ", clients.Select(c => c.DisplayName)))}");
-            selected = clients.FirstOrDefault(c => c.Key == cfg.SelectedClient) ?? clients.FirstOrDefault();
-            if (cfg.AutoUpdateProxified)
-                discord.FixProxifiedShortcuts(clients, cfg.GostPort);
-            clientState = ClientState.Stopped;
-            RefreshClient();
-            PollClient();
-        }
-
-        void Select(DiscordClient c)
-        {
-            selected = c;
-            cfg.SelectedClient = c.Key;
-            cfg.Save();
-            RefreshClient();
-            PollClient();
-        }
-
         void ShowClientMenu()
         {
             clientMenu.Items.Clear();
-            foreach (DiscordClient c in clients)
+            foreach (DiscordClient c in app.Clients)
             {
                 DiscordClient cc = c;
-                var item = new ToolStripMenuItem(c.DisplayName) { Checked = c == selected, ToolTipText = c.RootDir };
-                item.Click += (s, e) => Select(cc);
+                var item = new ToolStripMenuItem(c.DisplayName) { Checked = c == app.Selected, ToolTipText = c.RootDir };
+                item.Click += (s, e) => app.Select(cc);
                 clientMenu.Items.Add(item);
             }
-            if (clients.Count > 0)
+            if (app.Clients.Count > 0)
                 clientMenu.Items.Add(new ToolStripSeparator());
             var rescan = new ToolStripMenuItem(L.T("client.rescan"));
-            rescan.Click += (s, e) => Rescan();
+            rescan.Click += (s, e) => app.Rescan();
             var browse = new ToolStripMenuItem(L.T("client.browse"));
-            browse.Click += (s, e) => BrowseForDiscord();
+            browse.Click += (s, e) => app.BrowseForDiscord();
             clientMenu.Items.Add(rescan);
             clientMenu.Items.Add(browse);
             clientMenu.Show(changeButton, new Point(0, changeButton.Height + Theme.S(2)));
         }
 
-        void BrowseForDiscord()
+        public void RefreshClient()
         {
-            using (var dlg = new FolderBrowserDialog { Description = L.T("client.browse.desc"), ShowNewFolderButton = false })
-            {
-                dlg.SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                if (dlg.ShowDialog(this) != DialogResult.OK)
-                    return;
-                DiscordClient c = DiscordClients.FromFolder(dlg.SelectedPath);
-                if (c == null)
-                {
-                    Notify(Toast.Kind.Error, L.T("client.browse.invalid"), dlg.SelectedPath);
-                    return;
-                }
-                if (!cfg.CustomClientRoots.Contains(c.RootDir, StringComparer.OrdinalIgnoreCase))
-                    cfg.CustomClientRoots = cfg.CustomClientRoots.Concat(new[] { c.RootDir }).ToArray();
-                cfg.SelectedClient = c.Key;
-                cfg.Save();
-                Rescan();
-                if (selected != null && errorCard.Visible && errorCard.Error.Code == "DP-501")
-                    errorCard.Collapse();
-            }
-        }
-
-        void RefreshClient()
-        {
+            DiscordClient selected = app.Selected;
+            launchButton.Enabled = !app.Launching;
             if (selected == null)
             {
                 clientName.Text = L.T("client.none");
@@ -1245,7 +447,7 @@ namespace DiscordUnblocker
             }
             clientName.Text = selected.DisplayName;
             clientDot.Visible = true;
-            switch (clientState)
+            switch (app.ClientState)
             {
                 case ClientState.RunningWithProxy:
                     clientDot.Set(Theme.Success, false);
@@ -1268,102 +470,6 @@ namespace DiscordUnblocker
             int want = Math.Max(Theme.S(110), launchButton.PreferredWidth());
             if (launchButton.Width != want)
                 DoLayout();
-        }
-
-        // WMI is slow-ish, so the running state is read off the UI thread every few seconds.
-        void PollClient()
-        {
-            DiscordClient c = selected;
-            if (c == null || polling)
-                return;
-            polling = true;
-            string port = cfg.GostPort;
-            Task.Run(() =>
-            {
-                discord.PrepareNewAppFolder(c);
-                return discord.GetState(c, port);
-            }).ContinueWith(t =>
-            {
-                polling = false;
-                if (IsDisposed || c != selected)
-                    return;
-                if (t.Status == TaskStatus.RanToCompletion && t.Result != clientState)
-                {
-                    clientState = t.Result;
-                    RefreshClient();
-                }
-            }, TaskScheduler.FromCurrentSynchronizationContext());
-        }
-
-        async Task LaunchSelected()
-        {
-            if (selected == null)
-            {
-                ShowError(AppError.For("DP-501"));
-                return;
-            }
-            if (!proxy.IsRunning)
-            {
-                // Discord launched before the proxy is up hangs on "Starting"; connect first.
-                await Connect();
-                if (!proxy.IsRunning)
-                    return;
-            }
-            launchButton.Enabled = false;
-            DiscordClient c = selected;
-            string port = cfg.GostPort;
-            bool restarted = false;
-            string error = null;
-            bool ok = await Task.Run(() => discord.Launch(c, port, out restarted, out error));
-            launchButton.Enabled = true;
-            if (!ok)
-            {
-                ShowError(AppError.For("DP-503", error));
-                return;
-            }
-            Notify(Toast.Kind.Success, L.T(restarted ? "toast.discord.restarted" : "toast.discord.started"), L.T("toast.discord.sub"));
-            await Task.Delay(4000);
-            PollClient();
-        }
-
-        // ---------------- windows ----------------
-
-        void OpenLogs()
-        {
-            if (logsWindow == null || logsWindow.IsDisposed)
-            {
-                logsWindow = new LogsWindow(logger);
-                logsWindow.Show();
-            }
-            else
-            {
-                logsWindow.Activate();
-            }
-        }
-
-        void OpenSettings(string focus)
-        {
-            Configuration before = cfg.Clone();
-            using (var w = new SettingsWindow(cfg, logger, focus)
-            {
-                TorVersion = () => updater.InstalledTorVersion(),
-                TorUpdate = UpdateTor,
-                AppUpdate = CheckAppUpdate,
-                Repair = OpenRepair,
-                Report = CreateReport
-            })
-                w.ShowDialog(this);
-
-            if (cfg.OpenAtStartup != before.OpenAtStartup)
-                AppSetup.SetAutoStart(cfg.OpenAtStartup, logger);
-            if (cfg.GostPort != before.GostPort && cfg.AutoUpdateProxified)
-                discord.FixProxifiedShortcuts(clients, cfg.GostPort);
-            if (cfg.NetworkDiffers(before) && (proxy.IsRunning || proxy.IsStarting))
-            {
-                Notify(Toast.Kind.Info, L.T("toast.settings"), null);
-                var _ = Connect();
-            }
-            RefreshStatus();
         }
     }
 }

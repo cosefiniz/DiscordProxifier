@@ -407,3 +407,6 @@ Data/Warp/
 # dist/ holds the published binaries, including the x64/x86 version.dll builds
 !dist/x64/
 !dist/x86/
+
+# Claude Code worktrees
+.claude/worktrees/

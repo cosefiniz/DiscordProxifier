@@ -71,7 +71,7 @@ namespace DiscordUnblocker
     }
 
     // Shows the repair steps live, then offers to create a diagnostic report.
-    public class RepairWindow : BorderlessWindow
+    public class RepairWindow : BorderlessWindow, IRepairView
     {
         readonly List<StepRow> rows = new List<StepRow>();
         readonly TextLine summary;

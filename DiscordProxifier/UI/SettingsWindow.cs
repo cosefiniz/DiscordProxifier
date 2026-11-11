@@ -46,6 +46,8 @@ namespace DiscordUnblocker
         readonly Configuration cfg;
         readonly Logger logger;
 
+        readonly TextLine lLook;
+        readonly SegmentSwitch look;
         readonly TextLine hGeneral, hWarp, hTor, hAdvanced, lLanguage, lEndpoint, hintEndpoint, lBridges, hintBridges, lHttp, lSocks, portError, endpointError, footer;
         readonly SegmentSwitch language;
         readonly ToggleSwitch startup, launchAfter, shortcuts, fallback;
@@ -62,6 +64,7 @@ namespace DiscordUnblocker
         public Func<string> TorVersion;
         public Func<Task<string>> TorUpdate;
         public Func<Task<string>> AppUpdate;
+        public Action<string> SwitchAppearance;
 
         public SettingsWindow(Configuration cfg, Logger logger, string focus)
         {
@@ -82,6 +85,19 @@ namespace DiscordUnblocker
                 ApplyTexts();
             };
             Controls.Add(language);
+            lLook = Muted();
+            look = new SegmentSwitch { Labels = new[] { "Liquid Glass", L.T("look.classic") }, Height = Theme.S(34) };
+            look.SetIndex(1, false);
+            look.UserChanged += i =>
+            {
+                if (i != 0)
+                    return;
+                if (SwitchAppearance != null && MessageBox.Show(this, L.T("look.confirm"), "Discord Proxifier", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                    SwitchAppearance("glass");
+                else
+                    look.SetIndex(1, true);
+            };
+            Controls.Add(look);
             startup = Toggle(cfg.OpenAtStartup, v => cfg.OpenAtStartup = v);
             launchAfter = Toggle(cfg.LaunchDiscordAfterConnect, v => cfg.LaunchDiscordAfterConnect = v);
             shortcuts = Toggle(cfg.AutoUpdateProxified, v => cfg.AutoUpdateProxified = v);
@@ -281,6 +297,9 @@ namespace DiscordUnblocker
             Text = L.T("settings.title");
             hGeneral.Text = L.T("settings.general");
             lLanguage.Text = L.T("settings.language");
+            lLook.Text = L.T("look.style");
+            look.Labels = new[] { "Liquid Glass", L.T("look.classic") };
+            look.Invalidate();
             startup.Text = L.T("settings.startup");
             launchAfter.Text = L.T("settings.launchafter");
             shortcuts.Text = L.T("settings.shortcuts");
@@ -336,6 +355,9 @@ namespace DiscordUnblocker
             y += Theme.S(6);
             lLanguage.SetBounds(x, y + Theme.S(6), Theme.S(120), Theme.S(22));
             language.SetBounds(x + inner - Theme.S(210), y, Theme.S(210), Theme.S(34));
+            y += Theme.S(44);
+            lLook.SetBounds(x, y + Theme.S(6), Theme.S(120), Theme.S(22));
+            look.SetBounds(x + inner - Theme.S(210), y, Theme.S(210), Theme.S(34));
             y += Theme.S(44);
             place(startup, Theme.S(26));
             y += Theme.S(6);

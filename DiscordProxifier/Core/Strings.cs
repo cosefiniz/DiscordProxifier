@@ -5,7 +5,7 @@ namespace DiscordUnblocker
 {
     // UI text in English (default) and Turkish. Only these two languages are supported.
     // Logs stay in English so they can be shared and compared.
-    public static class L
+    public static partial class L
     {
         public static string Lang { get; set; } = "en";
 
@@ -23,7 +23,7 @@ namespace DiscordUnblocker
         public static string T(string key)
         {
             string[] v;
-            if (!Table.TryGetValue(key, out v))
+            if (!Table.TryGetValue(key, out v) && !GlassTable.TryGetValue(key, out v))
                 return key;
             return Lang == "tr" ? v[1] : v[0];
         }

@@ -29,11 +29,19 @@ namespace DiscordUnblocker
         // The Logs window's text box while it is open; null otherwise.
         public RichTextBox CurrentPanel;
 
+        // Raised for every new line, on the thread that logged it (the glass Logs window listens).
+        public event Action<Log> Added;
+
         public void Log(string text, LogType type = LogType.NORMAL)
         {
             var nl = new Log { Text = text, Type = type, Time = DateTime.UtcNow };
             lock (logs)
                 logs.Add(nl);
+            try
+            {
+                Added?.Invoke(nl);
+            }
+            catch { }
             RichTextBox box = CurrentPanel;
             if (box == null || box.IsDisposed || !box.IsHandleCreated)
                 return;
@@ -64,7 +72,7 @@ namespace DiscordUnblocker
             }
         }
 
-        static string Format(Log l)
+        public static string Format(Log l)
         {
             return $"[{l.Time.ToLocalTime():HH:mm:ss}][{l.Type}] {l.Text}";
         }
@@ -88,6 +96,12 @@ namespace DiscordUnblocker
                 snapshot = logs.ToList();
             foreach (Log l in snapshot)
                 AddLog(l, box);
+        }
+
+        public List<Log> Snapshot()
+        {
+            lock (logs)
+                return logs.ToList();
         }
 
         // Plain text of every log line, for the clipboard.

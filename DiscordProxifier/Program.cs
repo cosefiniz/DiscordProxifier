@@ -21,6 +21,13 @@ namespace DiscordUnblocker
         {
             Directory.SetCurrentDirectory(AppDomain.CurrentDomain.BaseDirectory);
 
+            // Design check: render a Liquid Glass window to a PNG and exit (no app start).
+            if (args.Contains("--glass-preview"))
+            {
+                Environment.ExitCode = Glass.GlassPreview.Run(args);
+                return;
+            }
+
             // Render crisply on high-DPI screens; custom controls scale via Theme.S().
             try
             {
@@ -59,7 +66,11 @@ namespace DiscordUnblocker
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (s, e) => logger.Log("Unexpected error: " + e.Exception, LogType.ERROR);
             bool updated = args.Contains("--updated");
-            Application.Run(new MainWindow(cfg, logger, startHidden) { JustUpdated = updated });
+            var app = new AppController(cfg, logger) { JustUpdated = updated };
+            if (cfg.Appearance == "classic")
+                Application.Run(new MainWindow(app, startHidden));
+            else
+                Glass.GlassApp.Run(app, startHidden);
         }
 
         static bool EnsureSingleInstance()
