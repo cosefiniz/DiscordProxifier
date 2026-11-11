@@ -644,6 +644,7 @@ namespace DiscordUnblocker
         }
 
         public AppError Error => error;
+        public AppError LastDismissed { get; private set; } // the card the user just closed
         Color CardBg => error != null && error.IsInfo ? Theme.InfoBg : Theme.DangerBg;
         public int CurrentHeight => (int)(fullHeight * open);
 
@@ -719,6 +720,7 @@ namespace DiscordUnblocker
             }, () =>
             {
                 Visible = false;
+                LastDismissed = notify ? error : null;
                 error = null;
                 if (notify)
                     Dismissed?.Invoke();

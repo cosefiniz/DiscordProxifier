@@ -16,6 +16,12 @@ namespace DiscordUnblocker
         readonly DiscordClients discord;
         readonly Updater updater;
         ManifestFile pendingUpdate;
+        string updateDismissedFor; // the user closed the card for this version: don't show it again
+        string updateBalloonFor;   // tray balloon already shown for this version
+        string torUpdateNotified;
+        DateTime nextUpdateCheck = DateTime.MaxValue;
+        DateTime lastUpdateCheck = DateTime.MinValue;
+        bool updateChecking;
 
         // Set by Program when this process was started by a self-update.
         public bool JustUpdated { get; set; }
@@ -158,6 +164,8 @@ namespace DiscordUnblocker
             errorCard.ActionClicked += async a => await RunAction(a);
             errorCard.Dismissed += () =>
             {
+                if (errorCard.LastDismissed != null && errorCard.LastDismissed.Code == "UPDATE")
+                    updateDismissedFor = errorCard.LastDismissed.Arg;
                 proxy.ClearError();
                 RefreshStatus();
             };
@@ -262,11 +270,46 @@ namespace DiscordUnblocker
 
         // Background update check against our own repo: fills in missing files, updates
         // version.dll automatically, and announces Tor / app updates (installed from Settings).
+        // Shows the update card for the pending version, but never over an error card: it waits
+        // until that card is gone (OnTimer calls this every tick). A card the user closed stays closed;
+        // one hidden for another reason (reconnect, an error) comes back.
+        void ShowPendingUpdate()
+        {
+            if (pendingUpdate == null || updateDismissedFor == pendingUpdate.Version || errorCard.Visible || exiting)
+                return;
+            bool balloon = updateBalloonFor != pendingUpdate.Version;
+            updateBalloonFor = pendingUpdate.Version;
+            ShowError(AppError.For("UPDATE", pendingUpdate.Version), balloon);
+        }
+
+        // While the app keeps running (tray, started with Windows) it checks again every 6 hours,
+        // and when the window is opened from the tray if the last check is over an hour old.
+        static readonly TimeSpan UpdateInterval = TimeSpan.FromHours(6);
+        static readonly TimeSpan UpdateRetryInterval = TimeSpan.FromMinutes(30);
+
+        async Task PeriodicUpdateCheck()
+        {
+            updateChecking = true;
+            try
+            {
+                logger.Log("Checking for updates");
+                await CheckUpdatesAsync(new List<string>());
+            }
+            finally
+            {
+                updateChecking = false;
+            }
+        }
+
         async Task CheckUpdatesAsync(List<string> missing)
         {
+            lastUpdateCheck = DateTime.Now;
+            nextUpdateCheck = DateTime.Now + UpdateInterval;
             Manifest m = await updater.FetchManifestAsync();
             if (m == null)
             {
+                // Offline (e.g. started with Windows before the network was up): try again sooner.
+                nextUpdateCheck = DateTime.Now + UpdateRetryInterval;
                 if (missing.Count > 0)
                     ShowError(missing.Contains("x64/version.dll") ? AppError.For("DP-502") : AppError.For("DP-103", missing[0]));
                 return;
@@ -281,13 +324,15 @@ namespace DiscordUnblocker
             pendingUpdate = Updater.AppUpdate(m);
             if (pendingUpdate != null)
             {
-                if (!errorCard.Visible)
-                    ShowError(AppError.For("UPDATE", pendingUpdate.Version));
+                ShowPendingUpdate(); // now, or as soon as the error card is gone
             }
             else if (Updater.IsNewer(m.AppVersion, AppSetup.AppVersion))
                 Notify(Toast.Kind.Info, L.F("toast.update.app", m.AppVersion), L.T("toast.update.sub"));
-            else if (torUpdate)
+            else if (torUpdate && torUpdateNotified != m.Get("Tor.zip")?.Version)
+            {
+                torUpdateNotified = m.Get("Tor.zip")?.Version;
                 Notify(Toast.Kind.Info, L.T("toast.update.tor"), L.T("toast.update.sub"));
+            }
             else if (dllUpdated)
                 Notify(Toast.Kind.Info, L.F("toast.dll.updated", updater.InstalledDllVersion), null);
         }
@@ -550,6 +595,8 @@ namespace DiscordUnblocker
             Show();
             WindowState = FormWindowState.Normal;
             Activate();
+            if (DateTime.Now - lastUpdateCheck > TimeSpan.FromHours(1) && lastUpdateCheck != DateTime.MinValue)
+                nextUpdateCheck = DateTime.Now; // the timer picks it up
         }
 
         // ---------------- layout and texts ----------------
@@ -658,6 +705,9 @@ namespace DiscordUnblocker
                 PollClient();
             if (!checking && (DateTime.Now >= pendingCheck || DateTime.Now >= nextHealthCheck))
                 _ = WatchdogAsync();
+            if (!updateChecking && DateTime.Now >= nextUpdateCheck)
+                _ = PeriodicUpdateCheck();
+            ShowPendingUpdate();
         }
 
         void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
@@ -855,12 +905,12 @@ namespace DiscordUnblocker
             }
         }
 
-        void ShowError(AppError e)
+        void ShowError(AppError e, bool balloon = true)
         {
             errorCard.ShowError(e);
             DoLayout();
             RefreshStatus();
-            if (!Visible || WindowState == FormWindowState.Minimized)
+            if (balloon && (!Visible || WindowState == FormWindowState.Minimized))
             {
                 if (e.IsInfo)
                     tray.ShowBalloonTip(5000, e.Title, e.Description, ToolTipIcon.Info);
