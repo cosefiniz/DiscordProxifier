@@ -303,34 +303,6 @@ namespace DiscordUnblocker
         }
     }
 
-    public class GostBridge : ProxyProcess
-    {
-        public GostBridge(Logger logger, string dataDir)
-            : base(logger, dataDir) { }
-
-        public override string Name => "Gost";
-
-        // gost logs every connection; only keep startup and fatal lines.
-        protected override bool ShouldLog(string line)
-        {
-            string l = line.ToLower();
-            return l.Contains("listen") || l.Contains("fatal") || l.Contains("bind");
-        }
-
-        public async Task StartAsync(int httpPort, int socksPort, CancellationToken ct)
-        {
-            EnsurePortFree(httpPort);
-            // Listen on loopback only; the original "-L=:port" exposed the proxy to the LAN.
-            process = Launch(
-                Path.Combine(dataDir, "gost.exe"),
-                $"-L=http://127.0.0.1:{httpPort} -F=socks5://127.0.0.1:{socksPort}",
-                dataDir
-            );
-            if (!await WaitForPortAsync(httpPort, TimeSpan.FromSeconds(10), ct))
-                throw new ProxyFailure("DP-102", httpPort.ToString(), "Gost failed to start");
-        }
-    }
-
     public abstract class ProxyBackend : ProxyProcess
     {
         protected ProxyBackend(Logger logger, string dataDir)
@@ -662,7 +634,7 @@ namespace DiscordUnblocker
         readonly string dataDir;
         readonly SemaphoreSlim gate = new SemaphoreSlim(1, 1);
         CancellationTokenSource cts = new CancellationTokenSource();
-        GostBridge gost;
+        LocalHttpProxy gost; // the HTTP proxy Discord uses (formerly gost.exe)
         ProxyBackend backend;
         int httpPort;
         int socksPort;
@@ -712,7 +684,7 @@ namespace DiscordUnblocker
                 if (!IsRunning)
                     return null;
                 if (!gost.IsAlive)
-                    return "Gost";
+                    return gost.Name;
                 if (!backend.IsAlive)
                     return backend.Name;
                 return null;
@@ -823,7 +795,7 @@ namespace DiscordUnblocker
                 socksPort = int.Parse(cfg.MainProxyPort);
 
                 progress = L.T("progress.gost");
-                gost = new GostBridge(logger, dataDir);
+                gost = new LocalHttpProxy(logger);
                 await gost.StartAsync(httpPort, socksPort, ct);
                 return await StartBackendAsync(mode, cfg, ct);
             }

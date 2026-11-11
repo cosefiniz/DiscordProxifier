@@ -19,7 +19,7 @@ New-Item -ItemType Directory (Join-Path $stage 'Data') -Force | Out-Null
 
 Copy-Item (Join-Path $bin 'DiscordProxifier.exe'), (Join-Path $bin 'DiscordProxifier.exe.config') $stage
 Copy-Item (Join-Path $root 'LICENSE') $stage
-foreach ($f in 'Tor.zip', 'gost.exe', 'wgcf.exe', 'wireproxy.exe', 'DllVer', 'x64\version.dll', 'x86\version.dll') {
+foreach ($f in 'Tor.zip', 'wgcf.exe', 'wireproxy.exe', 'DllVer', 'x64\version.dll', 'x86\version.dll') {
     $dst = Join-Path $stage "Data\$f"
     New-Item -ItemType Directory (Split-Path $dst) -Force | Out-Null
     Copy-Item (Join-Path $root "dist\$f") $dst

@@ -65,7 +65,8 @@ namespace DiscordUnblocker
         }
 
         // Keys in manifest.files, relative to Data\.
-        public static readonly string[] DataFiles = { "Tor.zip", "gost.exe", "wgcf.exe", "wireproxy.exe", "x64/version.dll", "x86/version.dll" };
+        // gost.exe stays in the manifest only for 2.1/2.2.0 clients; this version doesn't use it.
+        public static readonly string[] DataFiles = { "Tor.zip", "wgcf.exe", "wireproxy.exe", "x64/version.dll", "x86/version.dll" };
 
         static HttpClient Client(TimeSpan timeout)
         {

@@ -29,6 +29,19 @@ namespace DiscordUnblocker
             {
                 string data = DataDir;
                 Directory.CreateDirectory(data);
+                // gost.exe was replaced by the built-in LocalHttpProxy in 2.2.1. Many antivirus
+                // products flag it, so a copy left from an older version is removed.
+                try
+                {
+                    string gost = Path.Combine(data, "gost.exe");
+                    if (File.Exists(gost))
+                    {
+                        File.Delete(gost);
+                        logger.Log("Removed Data\\gost.exe (no longer used)");
+                    }
+                }
+                catch { }
+
                 string torExe = Path.Combine(data, "Tor", "tor.exe");
                 string torZip = Path.Combine(data, "Tor.zip");
                 if (!File.Exists(torExe) && File.Exists(torZip))
@@ -37,7 +50,7 @@ namespace DiscordUnblocker
                 var missing = new List<string>();
                 if (!File.Exists(torExe))
                     missing.Add("Tor.zip");
-                foreach (string f in new[] { "gost.exe", "wgcf.exe", "wireproxy.exe", "x64/version.dll", "x86/version.dll" })
+                foreach (string f in new[] { "wgcf.exe", "wireproxy.exe", "x64/version.dll", "x86/version.dll" })
                     if (!File.Exists(Path.Combine(data, f.Replace('/', '\\'))))
                         missing.Add(f);
                 logger.Log(missing.Count == 0 ? "Data check: all files present" : "Data check: missing " + string.Join(", ", missing),

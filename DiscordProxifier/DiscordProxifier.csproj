@@ -195,6 +195,7 @@
     <Compile Include="Core\Diagnostics.cs" />
     <Compile Include="Core\DiscordClients.cs" />
     <Compile Include="Core\Errors.cs" />
+    <Compile Include="Core\LocalHttpProxy.cs" />
     <Compile Include="Core\Logger.cs" />
     <Compile Include="Core\ProxyEngine.cs" />
     <Compile Include="Core\Strings.cs" />

@@ -255,7 +255,7 @@ namespace DiscordUnblocker
             ["DP-101.t"] = new[] { "Port in use", "Port kullanımda" },
             ["DP-101.d"] = new[] { "Port {0} is used by another program. Usually it's a leftover from an older DiscordProxifier copy.", "{0} numaralı portu başka bir program kullanıyor. Genellikle eski bir DiscordProxifier kopyasından kalan bir süreçtir." },
             ["DP-102.t"] = new[] { "Local proxy didn't start", "Yerel proxy başlamadı" },
-            ["DP-102.d"] = new[] { "gost.exe couldn't open port {0}. Antivirus software may have blocked or removed it.", "gost.exe {0} portunu açamadı. Bir antivirüs programı engellemiş ya da silmiş olabilir." },
+            ["DP-102.d"] = new[] { "The app couldn't open its local proxy on port {0}. Another program may be using it; change the port in Settings → Advanced.", "Uygulama yerel proxy'sini {0} portunda açamadı. Portu başka bir program kullanıyor olabilir; Ayarlar → Gelişmiş'ten portu değiştirin." },
             ["DP-103.t"] = new[] { "A required file is missing", "Gerekli bir dosya eksik" },
             ["DP-103.d"] = new[] { "{0} wasn't found. Copy the Data folder next to the app again.", "{0} bulunamadı. Data klasörünü uygulamanın yanına yeniden kopyalayın." },
             ["DP-201.t"] = new[] { "Couldn't reach the Tor network", "Tor ağına ulaşılamadı" },
