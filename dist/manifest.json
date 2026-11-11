@@ -1,5 +1,5 @@
 {
-    "appVersion":  "2.2.1",
+    "appVersion":  "2.2.2",
     "appDownload":  "https://github.com/cosefiniz/DiscordProxifier/releases/latest",
     "files":  {
                   "Tor.zip":  {
@@ -39,10 +39,10 @@
                                           "path":  "dist/x86/version.dll"
                                       },
                   "DiscordProxifier.exe":  {
-                                               "version":  "2.2.1",
-                                               "sha256":  "aa5d5f8d56c4702f0ae1ec250a5d7da89a47e5c8d8ff6db814b657cca2d96e7d",
-                                               "size":  670208,
-                                               "url":  "https://github.com/cosefiniz/DiscordProxifier/releases/download/v2.2.1/DiscordProxifier.exe"
+                                               "version":  "2.2.2",
+                                               "sha256":  "e5aec601400c41e7fe82047ccaf4852bd51ed4dc5001d80b4bf050c430242894",
+                                               "size":  671744,
+                                               "url":  "https://github.com/cosefiniz/DiscordProxifier/releases/download/v2.2.2/DiscordProxifier.exe"
                                            }
               }
 }
