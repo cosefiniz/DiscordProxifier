@@ -1,2 +1,4 @@
 SocksPort 127.0.0.1:42314
 DataDirectory C:\Users\yusuf\Documents\Codex\Proxifier\DiscordProxifier-v2\dist\Tor\data
+ControlPort 127.0.0.1:42364
+CookieAuthentication 1

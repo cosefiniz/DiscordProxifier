@@ -255,6 +255,15 @@ namespace DiscordUnblocker
             }
         }
 
+        // First port in [start, start+count) that nobody listens on, skipping 'avoid'.
+        public static int FreePort(int start, int count, params int[] avoid)
+        {
+            for (int p = start; p < start + count; p++)
+                if (Array.IndexOf(avoid, p) < 0 && !IsPortOpen(p))
+                    return p;
+            return start + count;
+        }
+
         public static bool IsPortOpen(int port)
         {
             using (var c = new TcpClient())
@@ -353,6 +362,40 @@ namespace DiscordUnblocker
 
         TaskCompletionSource<bool> bootstrapped;
         static readonly Regex BootstrapRe = new Regex(@"Bootstrapped (\d+)%");
+        int controlPort;
+        string cookieFile;
+
+        // Asks Tor for fresh circuits (a new exit). Discord often rejects or rate-limits a
+        // particular exit (HTTP 403/429); a new exit fixes that in a second, without a restart.
+        public async Task<bool> NewCircuitAsync()
+        {
+            if (!IsAlive || controlPort == 0 || !File.Exists(cookieFile))
+                return false;
+            try
+            {
+                string cookie = BitConverter.ToString(File.ReadAllBytes(cookieFile)).Replace("-", "");
+                using (var c = new TcpClient())
+                {
+                    await c.ConnectAsync(IPAddress.Loopback, controlPort);
+                    var s = c.GetStream();
+                    var r = new StreamReader(s, Encoding.ASCII);
+                    var w = new StreamWriter(s, Encoding.ASCII) { AutoFlush = true, NewLine = "\r\n" };
+                    await w.WriteLineAsync("AUTHENTICATE " + cookie);
+                    string auth = await r.ReadLineAsync();
+                    await w.WriteLineAsync("SIGNAL NEWNYM");
+                    string sig = await r.ReadLineAsync();
+                    await w.WriteLineAsync("QUIT");
+                    bool ok = auth != null && auth.StartsWith("250") && sig != null && sig.StartsWith("250");
+                    logger.Log(ok ? "Tor: new circuits requested (NEWNYM)" : $"Tor: NEWNYM refused ({auth} / {sig})", ok ? LogType.NORMAL : LogType.WARNING);
+                    return ok;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Log("Tor: NEWNYM failed: " + ex.Message, LogType.WARNING);
+                return false;
+            }
+        }
 
         protected override bool ShouldLog(string line)
         {
@@ -427,6 +470,11 @@ namespace DiscordUnblocker
             var torrc = new StringBuilder();
             torrc.AppendLine($"SocksPort 127.0.0.1:{socksPort}");
             torrc.AppendLine($"DataDirectory {dataDirectory}");
+            // Control port (cookie auth) so a new exit can be requested without restarting Tor.
+            controlPort = FreePort(socksPort + 50, 30, int.Parse(cfg.GostPort));
+            cookieFile = Path.Combine(dataDirectory, "control_auth_cookie");
+            torrc.AppendLine($"ControlPort 127.0.0.1:{controlPort}");
+            torrc.AppendLine("CookieAuthentication 1");
             if (bridges.Length > 0)
             {
                 // Relative exec paths are resolved against tor's working directory (Data\Tor).
@@ -490,7 +538,11 @@ namespace DiscordUnblocker
         // wireproxy's debug output starts ~50 "Routine: … started" lines; keep only the useful ones.
         protected override bool ShouldLog(string line)
         {
-            return !(line.Contains("Routine:") || line.Contains("UAPI:") || line.Contains("worker"));
+            if (line.Contains("Routine:") || line.Contains("UAPI:") || line.Contains("worker"))
+                return false;
+            // After the first successful handshake WireGuard repeats handshakes and keepalives
+            // every couple of minutes; they only add noise.
+            return !(HandshakeSeen && (line.Contains("handshake") || line.Contains("keepalive")));
         }
 
         protected override void OnOutput(string line)
@@ -667,6 +719,23 @@ namespace DiscordUnblocker
             }
         }
 
+        // Quick end-to-end check of the running route, used by the watchdog.
+        public async Task<ProbeResult> HealthCheckAsync()
+        {
+            ProxyBackend b = backend;
+            if (!IsRunning || b == null)
+                return null;
+            return b is DirectBackend
+                ? await TlsProbe.ProbeAsync(httpPort, "discord.com", TimeSpan.FromSeconds(15), CancellationToken.None)
+                : await ProbeAsync(httpPort, ProbeUrl, TimeSpan.FromSeconds(20), CancellationToken.None);
+        }
+
+        public async Task<bool> NewCircuitAsync()
+        {
+            var tor = backend as TorBackend;
+            return tor != null && await tor.NewCircuitAsync();
+        }
+
         // Kills tor/gost/wireproxy left over from a crashed earlier run (only those under our Data dir).
         public void KillOrphans()
         {
@@ -820,8 +889,40 @@ namespace DiscordUnblocker
             }
         }
 
+        // Order for the automatic route: the preferred (last working) mode, then the rest fastest
+        // first. WARP is only tried once its terms were accepted (no dialogs during auto).
+        static List<ProxyMode> AutoOrder(ProxyMode preferred, Configuration cfg)
+        {
+            var order = new List<ProxyMode> { preferred };
+            order.AddRange(ProxyModes.All.Where(m => m != preferred));
+            if (!cfg.WarpTosAccepted)
+                order.Remove(ProxyMode.Warp);
+            return order;
+        }
+
         async Task<bool> StartBackendAsync(ProxyMode mode, Configuration cfg, CancellationToken ct)
         {
+            if (cfg.AutoRoute)
+            {
+                List<ProxyMode> order = AutoOrder(mode, cfg);
+                var tried = new List<string>();
+                foreach (ProxyMode m in order)
+                {
+                    try
+                    {
+                        logger.Log($"Auto route: trying {ProxyModes.ToConfig(m)}");
+                        progress = L.F("progress.auto", ProxyModes.Display(m));
+                        await TryBackendAsync(m, cfg, ct);
+                        return true;
+                    }
+                    catch (ProxyFailure f)
+                    {
+                        logger.Log($"Auto route: {ProxyModes.ToConfig(m)} failed ({f.Code})", LogType.WARNING);
+                        tried.Add($"{ProxyModes.Display(m)} {f.Code}");
+                    }
+                }
+                throw new ProxyFailure("DP-700", string.Join(", ", tried), "No route works: " + string.Join(", ", tried));
+            }
             try
             {
                 await TryBackendAsync(mode, cfg, ct);

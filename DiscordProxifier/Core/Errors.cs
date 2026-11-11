@@ -14,7 +14,8 @@ namespace DiscordUnblocker
         OpenFolder,
         BrowseDiscord,
         RescanDiscord,
-        RetryDll
+        RetryDll,
+        NewCircuit
     }
 
     // A user-facing problem: a stable code (DP-xxx), an argument for the localized
@@ -58,7 +59,9 @@ namespace DiscordUnblocker
                 case "DP-401":
                     return new AppError(code, arg, ErrorAction.Retry, ErrorAction.SwitchMode);
                 case "DP-402":
-                    return new AppError(code, arg, ErrorAction.Retry, ErrorAction.SwitchMode);
+                    return new AppError(code, arg, ErrorAction.NewCircuit, ErrorAction.SwitchMode);
+                case "DP-700":
+                    return new AppError(code, arg, ErrorAction.Retry, ErrorAction.AddBridges, ErrorAction.OpenLogs);
                 case "DP-601":
                     return new AppError(code, arg, ErrorAction.SwitchMode, ErrorAction.Retry);
                 case "DP-602":

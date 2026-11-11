@@ -357,7 +357,10 @@ namespace DiscordUnblocker
             {
                 if (host != null && host.EndsWith("discord.com"))
                     DnsFailed = true;
-                Report("dns:" + host, $"could not resolve {host} over DoH");
+                // Discord also asks for random telemetry names that don't exist; only Discord
+                // names matter for whether the route works.
+                Report("dns:" + host, $"could not resolve {host} over DoH",
+                    host != null && host.Contains("discord") ? LogType.WARNING : LogType.NORMAL);
                 return null;
             }
             Report("route:" + (host ?? targets[0].ToString()), $"{host ?? "(address)"}:{port} -> {targets[0]}", LogType.NORMAL);

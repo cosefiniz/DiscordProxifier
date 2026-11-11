@@ -1,24 +1,34 @@
 # Discord Proxifier v2
 
-Routes the Discord desktop app through **Tor** or **Cloudflare WARP** so it works where Discord is blocked. Voice, video and streaming keep going direct.
+Makes the Discord desktop app work where Discord is blocked, using one of three routes: **Direct**, **Cloudflare WARP** or **Tor**. Voice, video and streaming keep going direct.
 
 Based on [s0rp/DiscordProxifier](https://github.com/s0rp/DiscordProxifier), which uses the proxy method from [aiqinxuancai/discord-proxy](https://github.com/aiqinxuancai/discord-proxy).
 
 ## Use
 
 1. Download the zip from [Releases](../../releases/latest) and extract it anywhere.
-2. Run `DiscordProxifier.exe`, press **Connect**, then **Launch**.
-3. Pick **Tor** or **WARP** with the switch. Some providers block WARP; Tor works almost everywhere.
+2. Run `DiscordProxifier.exe`. It connects on its own; press **Launch** to open Discord.
 
-The app connects automatically when it opens (it remembers the last route). Language: English or Türkçe in Settings.
+| Route | How it works | Speed |
+|---|---|---|
+| **Direct** | No server in between: names are resolved over encrypted DNS and the first TLS packet is split so the provider's filter can't read the site name | fastest |
+| **WARP** | Cloudflare's free WARP tunnel | fast; some providers block it |
+| **Tor** | The Tor network | slower; works almost everywhere |
+
+With **Pick the fastest working route** on (default), the app tries Direct, then WARP, then Tor, and remembers what worked. It reconnects by itself after sleep, a network change or a dropped connection, and on Tor it asks for a new exit when Discord refuses the current one. Language: English or Türkçe in Settings.
 
 ## Kullanım (TR)
 
 1. [Releases](../../releases/latest) sayfasından zip'i indirip bir klasöre çıkarın.
-2. `DiscordProxifier.exe`'yi açın, **Connect**'e ve ardından **Launch**'a basın.
-3. Anahtarla **Tor** veya **WARP** seçin. Bazı sağlayıcılar WARP'ı engeller; Tor neredeyse her yerde çalışır.
+2. `DiscordProxifier.exe`'yi açın. Kendiliğinden bağlanır; Discord'u açmak için **Başlat**'a basın.
 
-Uygulama açılınca son kullanılan yol ile otomatik bağlanır. Dil Ayarlar'dan Türkçe yapılabilir.
+| Yol | Nasıl çalışır | Hız |
+|---|---|---|
+| **Doğrudan** | Araya sunucu girmez: adresler şifreli DNS ile bulunur, ilk TLS paketi bölünür; sağlayıcının filtresi site adını okuyamaz | en hızlı |
+| **WARP** | Cloudflare'in ücretsiz WARP tüneli | hızlı; bazı sağlayıcılar engelliyor |
+| **Tor** | Tor ağı | daha yavaş; hemen her yerde çalışır |
+
+**Çalışan en hızlı yolu otomatik seç** açıkken (varsayılan) uygulama önce Doğrudan'ı, sonra WARP'ı, sonra Tor'u dener ve çalışanı hatırlar. Uykudan uyanınca, ağ değişince ya da bağlantı koptuğunda kendiliğinden yeniden bağlanır; Tor'da Discord çıkış noktasını reddederse yenisini ister. Dil Ayarlar'dan Türkçe yapılabilir.
 
 ## If Windows Security or your antivirus blocks it
 

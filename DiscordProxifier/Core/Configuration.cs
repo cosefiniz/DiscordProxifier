@@ -12,6 +12,7 @@ namespace DiscordUnblocker
         public string Language { get; set; } = "en"; // "en" or "tr"
         public bool OpenAtStartup { get; set; }
         public bool AutoConnect { get; set; } = true; // Tor bootstraps while the user is still getting ready
+        public bool AutoRoute { get; set; } = true; // try Direct, WARP and Tor; keep the first that works
         public bool LaunchDiscordAfterConnect { get; set; }
         public bool AutoUpdateProxified { get; set; }
         public string SelectedClient { get; set; } // DiscordClient.Key

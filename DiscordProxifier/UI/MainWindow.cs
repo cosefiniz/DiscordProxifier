@@ -25,6 +25,15 @@ namespace DiscordUnblocker
         int tick;
         bool polling;
 
+        // Watchdog: periodic health checks, plus a check shortly after resume / network change.
+        DateTime nextHealthCheck = DateTime.MaxValue;
+        DateTime pendingCheck = DateTime.MaxValue;
+        string pendingReason;
+        bool checking;
+        int healthFails;
+        DateTime lastReconnect = DateTime.MinValue;
+        bool lastConnectFailed;
+
         // Title bar
         readonly FlatButton trayButton, minButton;
 
@@ -38,7 +47,7 @@ namespace DiscordUnblocker
         // Route
         readonly TextLine routeLabel, routeHint;
         readonly SegmentSwitch route;
-        readonly ToggleSwitch autoConnect;
+        readonly ToggleSwitch autoConnect, autoRoute;
 
         // Discord card
         readonly Card discordCard;
@@ -103,7 +112,17 @@ namespace DiscordUnblocker
                 cfg.AutoConnect = autoConnect.Checked;
                 cfg.Save();
             };
-            Controls.AddRange(new Control[] { routeLabel, route, routeHint, autoConnect });
+            autoRoute = new ToggleSwitch { Checked = cfg.AutoRoute };
+            autoRoute.CheckedChanged += (s, e) =>
+            {
+                cfg.AutoRoute = autoRoute.Checked;
+                cfg.Save();
+                RefreshStatus();
+            };
+            Controls.AddRange(new Control[] { routeLabel, route, routeHint, autoRoute, autoConnect });
+
+            Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += OnNetworkChanged;
 
             // Discord card
             discordCard = new Card();
@@ -305,6 +324,8 @@ namespace DiscordUnblocker
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
             if (!exiting)
             {
                 exiting = true;
@@ -343,6 +364,7 @@ namespace DiscordUnblocker
             route.Labels = ProxyModes.All.Select(ProxyModes.Display).ToArray();
             route.Invalidate();
             autoConnect.Text = L.T("autoconnect");
+            autoRoute.Text = L.T("autoroute");
             discordLabel.Text = L.T("client.label");
             changeButton.Text = L.T("client.change");
             shortcutToggle.Text = L.T("client.shortcut");
@@ -385,6 +407,8 @@ namespace DiscordUnblocker
             y += Theme.S(46);
             routeHint.SetBounds(pad + Theme.S(2), y, inner, Theme.S(18));
             y += Theme.S(26);
+            autoRoute.SetBounds(pad, y, inner, Theme.S(24));
+            y += Theme.S(24) + Theme.S(8);
             autoConnect.SetBounds(pad, y, inner, Theme.S(24));
             y += Theme.S(24) + Theme.S(14);
 
@@ -436,6 +460,87 @@ namespace DiscordUnblocker
             RefreshStatus();
             if (++tick % 6 == 0)
                 PollClient();
+            if (!checking && (DateTime.Now >= pendingCheck || DateTime.Now >= nextHealthCheck))
+                _ = WatchdogAsync();
+        }
+
+        void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+        {
+            if (e.Mode == Microsoft.Win32.PowerModes.Resume && IsHandleCreated)
+                BeginInvoke(new Action(() => ScheduleCheck("reason.resume")));
+        }
+
+        void OnNetworkChanged(object sender, EventArgs e)
+        {
+            if (IsHandleCreated && !IsDisposed)
+                BeginInvoke(new Action(() => ScheduleCheck("reason.network")));
+        }
+
+        // Network events come in bursts; check once things have settled.
+        void ScheduleCheck(string reason)
+        {
+            pendingReason = reason;
+            pendingCheck = DateTime.Now.AddSeconds(6);
+        }
+
+        // Keeps the connection alive without the user noticing: reconnects when a part died,
+        // when two health checks in a row fail, or when a check after resume / network change
+        // fails. On Tor, a 403/429 from Discord only needs a new exit, not a reconnect.
+        async Task WatchdogAsync()
+        {
+            checking = true;
+            try
+            {
+                bool triggered = DateTime.Now >= pendingCheck;
+                string reason = triggered ? pendingReason : null;
+                pendingCheck = DateTime.MaxValue;
+                nextHealthCheck = DateTime.Now.AddSeconds(60);
+                if (exiting || proxy.IsStarting)
+                    return;
+                if (!proxy.IsRunning)
+                {
+                    // A failed auto-connect gets another chance once the network changes.
+                    if (triggered && cfg.AutoConnect && lastConnectFailed)
+                        await Reconnect(reason);
+                    return;
+                }
+                if (proxy.DeadPart != null)
+                {
+                    await Reconnect("reason.dropped");
+                    return;
+                }
+                ProbeResult r = await proxy.HealthCheckAsync();
+                if (r == null || r.Ok)
+                {
+                    healthFails = 0;
+                    return;
+                }
+                logger.Log("Watchdog: health check failed: " + r.Detail, LogType.WARNING);
+                if (proxy.ActiveMode == ProxyMode.Tor && (r.Status == 403 || r.Status == 429))
+                {
+                    if (await proxy.NewCircuitAsync())
+                        Notify(Toast.Kind.Info, L.T("toast.newcircuit"), L.T("toast.newcircuit.sub"));
+                    return;
+                }
+                if (triggered || ++healthFails >= 2)
+                {
+                    healthFails = 0;
+                    await Reconnect(reason ?? "reason.dropped");
+                }
+            }
+            finally
+            {
+                checking = false;
+            }
+        }
+
+        async Task Reconnect(string reasonKey)
+        {
+            if (DateTime.Now - lastReconnect < TimeSpan.FromSeconds(30))
+                return;
+            lastReconnect = DateTime.Now;
+            logger.Log($"Watchdog: reconnecting ({reasonKey})");
+            await Connect(reasonKey);
         }
 
         void RefreshStatus()
@@ -492,7 +597,8 @@ namespace DiscordUnblocker
             statusTitle.Text = title;
             statusSub.Text = sub;
             route.Busy = proxy.IsStarting;
-            routeHint.Text = L.T(mode == ProxyMode.Warp ? "route.warp.hint" : mode == ProxyMode.Direct ? "route.direct.hint" : "route.tor.hint");
+            string hint = L.T(mode == ProxyMode.Warp ? "route.warp.hint" : mode == ProxyMode.Direct ? "route.direct.hint" : "route.tor.hint");
+            routeHint.Text = cfg.AutoRoute ? L.F("route.auto.hint", hint) : hint;
             int want = Math.Max(Theme.S(104), connectButton.PreferredWidth());
             if (connectButton.Width != want)
                 DoLayout();
@@ -554,6 +660,8 @@ namespace DiscordUnblocker
         {
             if (proxy.IsStarting || proxy.IsRunning)
             {
+                lastConnectFailed = false;
+                nextHealthCheck = DateTime.MaxValue;
                 await proxy.StopAsync();
                 if (!exiting)
                 {
@@ -565,7 +673,7 @@ namespace DiscordUnblocker
             await Connect();
         }
 
-        async Task Connect()
+        async Task Connect(string reconnectReason = null)
         {
             if (mode == ProxyMode.Warp && !EnsureWarpConsent())
             {
@@ -576,7 +684,7 @@ namespace DiscordUnblocker
             Task<bool> start = proxy.StartAsync(mode, cfg);
             RefreshStatus();
             bool ok = await start;
-            AfterStart(ok, false);
+            AfterStart(ok, false, reconnectReason);
             if (ok && cfg.LaunchDiscordAfterConnect && selected != null && clientState != ClientState.RunningWithProxy)
                 await LaunchSelected();
         }
@@ -591,6 +699,13 @@ namespace DiscordUnblocker
                 Notify(Toast.Kind.Warning, L.T("warp.consent.declined"), null);
                 return;
             }
+            if (cfg.AutoRoute)
+            {
+                cfg.AutoRoute = false;
+                autoRoute.Checked = false;
+                cfg.Save();
+                Notify(Toast.Kind.Info, L.T("toast.auto.off"), null);
+            }
             SetMode(target, true);
             RefreshStatus();
             if (!proxy.IsRunning && !proxy.IsStarting)
@@ -602,17 +717,25 @@ namespace DiscordUnblocker
             AfterStart(ok, true);
         }
 
-        void AfterStart(bool ok, bool switched)
+        void AfterStart(bool ok, bool switched, string reconnectReason = null)
         {
             if (exiting)
                 return;
-            if (proxy.ActiveMode.HasValue && proxy.ActiveMode.Value != mode)
-                SetMode(proxy.ActiveMode.Value, true); // WARP -> Tor fallback
+            lastConnectFailed = !ok;
+            nextHealthCheck = ok ? DateTime.Now.AddSeconds(60) : DateTime.MaxValue;
+            healthFails = 0;
+            bool moved = proxy.ActiveMode.HasValue && proxy.ActiveMode.Value != mode;
+            if (moved)
+                SetMode(proxy.ActiveMode.Value, true); // auto route, or WARP -> Tor fallback
             RefreshStatus();
             if (ok)
             {
                 string m = ProxyModes.Display(mode);
-                if (switched)
+                if (reconnectReason != null)
+                    Notify(Toast.Kind.Info, L.F("toast.reconnected", m), L.T(reconnectReason));
+                else if (moved && cfg.AutoRoute)
+                    Notify(Toast.Kind.Info, L.F("toast.auto.picked", m), L.T("toast.auto.picked.sub"));
+                else if (switched)
                     Notify(Toast.Kind.Success, L.F("toast.mode", m), L.T("toast.mode.sub"));
                 else
                     Notify(Toast.Kind.Success, L.F("toast.connected", m), L.F("status.sub.connected", proxy.LastLatencyMs, m));
@@ -629,6 +752,17 @@ namespace DiscordUnblocker
             {
                 case ErrorAction.Retry:
                     await Connect();
+                    break;
+                case ErrorAction.NewCircuit:
+                    if (await proxy.NewCircuitAsync())
+                    {
+                        errorCard.Collapse();
+                        Notify(Toast.Kind.Info, L.T("toast.newcircuit"), null);
+                    }
+                    else
+                    {
+                        await Connect();
+                    }
                     break;
                 case ErrorAction.SwitchMode:
                     ProxyMode target = ProxyModes.Next(mode);
@@ -713,8 +847,13 @@ namespace DiscordUnblocker
                 Notify(Toast.Kind.Success, L.T("toast.test.ok"), detail);
                 return;
             }
-            Notify(Toast.Kind.Error, L.T("toast.test.fail"), detail);
             int st = bad.Result.Status;
+            if (proxy.ActiveMode == ProxyMode.Tor && (st == 403 || st == 429) && await proxy.NewCircuitAsync())
+            {
+                Notify(Toast.Kind.Info, L.T("toast.newcircuit"), L.T("toast.newcircuit.sub"));
+                return;
+            }
+            Notify(Toast.Kind.Error, L.T("toast.test.fail"), detail);
             ShowError(st == 403 || st == 429
                 ? AppError.For("DP-402", "HTTP " + st)
                 : AppError.For("DP-401", st > 0 ? "HTTP " + st : bad.Name));
