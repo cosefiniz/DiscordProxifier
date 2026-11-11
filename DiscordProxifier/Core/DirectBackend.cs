@@ -416,6 +416,51 @@ namespace DiscordUnblocker
 
         // Re-frames one TLS record as two records split inside the host name, which the SNI
         // filter does not reassemble. Returns the record unchanged when the name isn't found.
+        // Can the Direct route reach Discord right now? Runs without the proxy chain: DoH, a TCP
+        // connection to Discord's address and a split TLS 1.3 handshake. About a second when it works.
+        public static async Task<bool> WorksNowAsync(TimeSpan timeout)
+        {
+            try
+            {
+                IPAddress[] ips = await Doh.Resolve("discord.com");
+                if (ips.Length == 0)
+                    return false;
+                using (var c = new TcpClient(ips[0].AddressFamily) { NoDelay = true })
+                {
+                    Task connect = c.ConnectAsync(ips, 443);
+                    if (await Task.WhenAny(connect, Task.Delay(timeout)) != connect || connect.IsFaulted)
+                        return false;
+                    return await TlsProbe.HandshakeAsync(c.GetStream(), "discord.com", timeout, CancellationToken.None,
+                        hello => SplitInsideName(hello, "discord.com"));
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // Plain internet check that doesn't depend on DNS: TCP to well-known anycast resolvers.
+        public static async Task<bool> InternetUpAsync()
+        {
+            if (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
+                return false;
+            foreach (string ip in new[] { "1.1.1.1", "8.8.8.8", "9.9.9.9" })
+            {
+                using (var c = new TcpClient())
+                {
+                    try
+                    {
+                        Task t = c.ConnectAsync(IPAddress.Parse(ip), 443);
+                        if (await Task.WhenAny(t, Task.Delay(3000)) == t && !t.IsFaulted)
+                            return true;
+                    }
+                    catch { }
+                }
+            }
+            return false;
+        }
+
         static byte[] SplitInsideName(byte[] record, string host)
         {
             byte[] payload = record.Skip(5).ToArray();
@@ -534,7 +579,8 @@ namespace DiscordUnblocker
         }
 
         // TLS 1.3 handshake on an already open tunnel: ServerHello plus one encrypted record.
-        public static async Task<bool> HandshakeAsync(NetworkStream s, string host, TimeSpan timeout, CancellationToken ct)
+        public static async Task<bool> HandshakeAsync(NetworkStream s, string host, TimeSpan timeout, CancellationToken ct,
+            Func<byte[], byte[]> transform = null)
         {
             using (var t = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
@@ -544,6 +590,8 @@ namespace DiscordUnblocker
                     try
                     {
                         byte[] hello = ClientHello(host);
+                        if (transform != null)
+                            hello = transform(hello);
                         await s.WriteAsync(hello, 0, hello.Length, t.Token);
                         byte[] rec = await ReadRecord(s, t.Token);
                         if (rec[0] != 0x16 || rec[5] != 0x02)

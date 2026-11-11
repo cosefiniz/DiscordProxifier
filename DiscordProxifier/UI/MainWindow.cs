@@ -33,6 +33,7 @@ namespace DiscordUnblocker
         int healthFails;
         DateTime lastReconnect = DateTime.MinValue;
         bool lastConnectFailed;
+        DateTime nextDirectCheck = DateTime.MaxValue;
 
         // Title bar
         readonly FlatButton trayButton, minButton;
@@ -513,6 +514,12 @@ namespace DiscordUnblocker
                 if (r == null || r.Ok)
                 {
                     healthFails = 0;
+                    await TryUpgradeToDirect();
+                    return;
+                }
+                if (!await DirectBackend.InternetUpAsync())
+                {
+                    WaitForInternet(reason ?? "reason.dropped");
                     return;
                 }
                 logger.Log("Watchdog: health check failed: " + r.Detail, LogType.WARNING);
@@ -534,8 +541,36 @@ namespace DiscordUnblocker
             }
         }
 
+        void WaitForInternet(string reasonKey)
+        {
+            logger.Log("Watchdog: no internet, waiting for the network");
+            pendingReason = reasonKey;
+            pendingCheck = DateTime.Now.AddSeconds(8);
+        }
+
+        // With the automatic route on a slower route (WARP/Tor), every few minutes check whether
+        // Direct works again and move back to it; a temporary outage shouldn't leave the app on Tor.
+        async Task TryUpgradeToDirect()
+        {
+            if (!cfg.AutoRoute || proxy.ActiveMode == ProxyMode.Direct || DateTime.Now < nextDirectCheck)
+                return;
+            nextDirectCheck = DateTime.Now.AddMinutes(10);
+            if (!await DirectBackend.WorksNowAsync(TimeSpan.FromSeconds(6)))
+                return;
+            logger.Log("Auto route: Direct works again, switching back");
+            SetMode(ProxyMode.Direct, true);
+            Task<bool> sw = proxy.SwitchModeAsync(ProxyMode.Direct, cfg);
+            RefreshStatus();
+            AfterStart(await sw, true);
+        }
+
         async Task Reconnect(string reasonKey)
         {
+            if (!await DirectBackend.InternetUpAsync())
+            {
+                WaitForInternet(reasonKey);
+                return;
+            }
             if (DateTime.Now - lastReconnect < TimeSpan.FromSeconds(30))
                 return;
             lastReconnect = DateTime.Now;
@@ -681,6 +716,11 @@ namespace DiscordUnblocker
                 Notify(Toast.Kind.Warning, L.T("warp.consent.declined"), null);
             }
             errorCard.Collapse(false);
+            if (cfg.AutoRoute && mode != ProxyMode.Direct && await DirectBackend.WorksNowAsync(TimeSpan.FromSeconds(4)))
+            {
+                logger.Log("Auto route: Direct works on this network, trying it first");
+                SetMode(ProxyMode.Direct, false);
+            }
             Task<bool> start = proxy.StartAsync(mode, cfg);
             RefreshStatus();
             bool ok = await start;
@@ -722,6 +762,7 @@ namespace DiscordUnblocker
             if (exiting)
                 return;
             lastConnectFailed = !ok;
+            nextDirectCheck = DateTime.Now.AddMinutes(2);
             nextHealthCheck = ok ? DateTime.Now.AddSeconds(60) : DateTime.MaxValue;
             healthFails = 0;
             bool moved = proxy.ActiveMode.HasValue && proxy.ActiveMode.Value != mode;
