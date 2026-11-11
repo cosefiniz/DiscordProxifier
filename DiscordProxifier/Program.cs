@@ -36,6 +36,20 @@ namespace DiscordUnblocker
             Configuration cfg = Configuration.Load();
             L.Set(cfg.Language);
 
+            // After a self-update the new exe is started by the old one: wait for it to exit
+            // so the single-instance check doesn't ask about it, then remove the old file.
+            int waitPid;
+            int w = Array.IndexOf(args, "--wait-pid");
+            if (w >= 0 && w + 1 < args.Length && int.TryParse(args[w + 1], out waitPid))
+            {
+                try
+                {
+                    Process.GetProcessById(waitPid).WaitForExit(15000);
+                }
+                catch { }
+            }
+            Updater.CleanupOldExe();
+
             if (!EnsureSingleInstance())
                 return;
 
@@ -44,7 +58,8 @@ namespace DiscordUnblocker
             // An unexpected UI error is logged instead of showing the .NET crash dialog.
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (s, e) => logger.Log("Unexpected error: " + e.Exception, LogType.ERROR);
-            Application.Run(new MainWindow(cfg, logger, startHidden));
+            bool updated = args.Contains("--updated");
+            Application.Run(new MainWindow(cfg, logger, startHidden) { JustUpdated = updated });
         }
 
         static bool EnsureSingleInstance()

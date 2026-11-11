@@ -20,9 +20,12 @@ namespace DiscordUnblocker
         public const string Repo = "DiscordProxifier";
         public const string Branch = "main";
 
-        public static bool Configured => Owner != "OWNER";
+        public static bool Configured => Owner != "OWNER" || Environment.GetEnvironmentVariable("DISCORDPROXIFIER_MANIFEST") != null;
         public static string Raw(string path) => $"https://raw.githubusercontent.com/{Owner}/{Repo}/{Branch}/{path}";
-        public static string ManifestUrl => Raw("dist/manifest.json");
+        // DISCORDPROXIFIER_MANIFEST points the app at another manifest (used to test self-updates
+        // against a local server); normal installs never set it.
+        public static string ManifestUrl =>
+            Environment.GetEnvironmentVariable("DISCORDPROXIFIER_MANIFEST") ?? Raw("dist/manifest.json");
         public static string ReleasesPage => $"https://github.com/{Owner}/{Repo}/releases/latest";
     }
 
@@ -32,6 +35,9 @@ namespace DiscordUnblocker
         [JsonProperty("sha256")] public string Sha256;
         [JsonProperty("path")] public string Path;
         [JsonProperty("size")] public long Size;
+        [JsonProperty("url")] public string Url; // absolute (GitHub release asset); else Path is used
+
+        public string Source => !string.IsNullOrEmpty(Url) ? Url : UpdateSource.Raw(Path);
     }
 
     public class Manifest
@@ -98,15 +104,15 @@ namespace DiscordUnblocker
         // Downloads a manifest entry to 'target' and keeps it only if the SHA256 matches.
         public async Task<bool> DownloadVerifiedAsync(ManifestFile f, string target)
         {
-            if (f == null || string.IsNullOrEmpty(f.Path) || string.IsNullOrEmpty(f.Sha256))
+            if (f == null || (string.IsNullOrEmpty(f.Path) && string.IsNullOrEmpty(f.Url)) || string.IsNullOrEmpty(f.Sha256))
                 return false;
             string part = target + ".part";
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(target));
-                logger.Log($"Downloading {f.Path} ({f.Version})");
+                logger.Log($"Downloading {f.Path ?? f.Url} ({f.Version})");
                 using (HttpClient c = Client(TimeSpan.FromMinutes(10)))
-                using (Stream src = await c.GetStreamAsync(UpdateSource.Raw(f.Path)))
+                using (Stream src = await c.GetStreamAsync(f.Source))
                 using (FileStream dst = File.Create(part))
                     await src.CopyToAsync(dst);
                 string actual = Sha256(part);
@@ -146,6 +152,118 @@ namespace DiscordUnblocker
                 if (await DownloadVerifiedAsync(m.Get(key), target) && key == "Tor.zip")
                     InstallTorZip(target, m.Get(key).Version);
             }
+        }
+
+        // ---------- the app itself ----------
+
+        public const string AppKey = "DiscordProxifier.exe";
+
+        static string ExePath => Process.GetCurrentProcess().MainModule.FileName;
+
+        // The manifest entry for a newer exe, or null when up to date / not published.
+        public static ManifestFile AppUpdate(Manifest m)
+        {
+            ManifestFile f = m?.Get(AppKey);
+            return f != null && IsNewer(f.Version, AppSetup.AppVersion) ? f : null;
+        }
+
+        // Downloads the new exe next to the running one and checks both the SHA256 and the
+        // assembly version inside it. Returns the path of the verified file, or null.
+        public async Task<string> DownloadAppAsync(ManifestFile f)
+        {
+            string target = ExePath + ".new";
+            if (!await DownloadVerifiedAsync(f, target))
+                return null;
+            try
+            {
+                Version v = System.Reflection.AssemblyName.GetAssemblyName(target).Version;
+                if (!IsNewer(v.ToString(3), AppSetup.AppVersion) || v.ToString(3) != new Version(f.Version).ToString(3))
+                {
+                    logger.Log($"Downloaded exe reports version {v}, expected {f.Version}; discarded", LogType.ERROR);
+                    File.Delete(target);
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Log("Downloaded exe is not a valid program: " + ex.Message, LogType.ERROR);
+                try
+                {
+                    File.Delete(target);
+                }
+                catch { }
+                return null;
+            }
+            return target;
+        }
+
+        // Swaps the running exe for the new one and starts it. A running exe can't be
+        // overwritten on Windows but it can be renamed, so: exe -> exe.old, new -> exe.
+        // The new process waits for this one to exit before its single-instance check.
+        public bool SwapAndRestart(string newExe, bool startHidden)
+        {
+            string exe = ExePath;
+            string old = exe + ".old";
+            try
+            {
+                if (File.Exists(old))
+                    File.Delete(old);
+                File.Move(exe, old);
+                try
+                {
+                    File.Move(newExe, exe);
+                }
+                catch
+                {
+                    File.Move(old, exe); // put the working exe back
+                    throw;
+                }
+                string args = $"--updated --wait-pid {Process.GetCurrentProcess().Id}" + (startHidden ? " --tray" : "");
+                Process.Start(new ProcessStartInfo(exe, args) { UseShellExecute = true, WorkingDirectory = System.IO.Path.GetDirectoryName(exe) });
+                logger.Log("Update installed, restarting");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.Log("Could not install the update: " + ex.Message, LogType.ERROR);
+                return false;
+            }
+        }
+
+        // Removes the previous exe left behind by an update (it was still running back then).
+        public static void CleanupOldExe()
+        {
+            try
+            {
+                string old = ExePath + ".old";
+                if (File.Exists(old))
+                    File.Delete(old);
+                string part = ExePath + ".new";
+                if (File.Exists(part))
+                    File.Delete(part);
+            }
+            catch { }
+        }
+
+        // SHA256 check of the Data files against the manifest. Returns the keys that are missing
+        // or differ (Tor.zip is skipped once Tor is unpacked; tor.exe itself is checked by running).
+        public List<string> VerifyDataFiles(Manifest m)
+        {
+            var bad = new List<string>();
+            foreach (string key in DataFiles)
+            {
+                ManifestFile f = m.Get(key);
+                string path = System.IO.Path.Combine(dataDir, key.Replace('/', '\\'));
+                if (key == "Tor.zip")
+                {
+                    if (!File.Exists(System.IO.Path.Combine(dataDir, "Tor", "tor.exe")))
+                        bad.Add(key);
+                    continue;
+                }
+                if (!File.Exists(path) || (f != null && !Sha256(path).Equals(f.Sha256, StringComparison.OrdinalIgnoreCase)))
+                    bad.Add(key);
+            }
+            return bad;
         }
 
         // ---------- version.dll (updated automatically) ----------
@@ -190,7 +308,11 @@ namespace DiscordUnblocker
             try
             {
                 if (File.Exists(TorVerFile))
-                    return File.ReadAllText(TorVerFile).Trim();
+                {
+                    string cached = File.ReadAllText(TorVerFile).Trim();
+                    if (cached.Length > 0)
+                        return cached;
+                }
                 string exe = Path.Combine(TorDir, "tor.exe");
                 if (!File.Exists(exe))
                     return null;
@@ -268,7 +390,12 @@ namespace DiscordUnblocker
                         File.Delete(final);
                     File.Move(zipPath, final);
                 }
-                File.WriteAllText(TorVerFile, version ?? "");
+                // Unknown version (first-run unpack of the bundled zip): let InstalledTorVersion ask
+                // tor.exe. An empty file used to make every start report "Tor update available".
+                if (string.IsNullOrEmpty(version))
+                    File.Delete(TorVerFile);
+                else
+                    File.WriteAllText(TorVerFile, version);
                 logger.Log($"Tor {version} installed");
                 return true;
             }

@@ -1,6 +1,11 @@
 # Regenerates dist/manifest.json from the files in dist/.
 # The app reads this file from GitHub and only installs downloads whose SHA256 matches.
 # Run it after changing anything in dist/, then commit and push.
+#
+# -App: also publish the freshly built exe (bin\Release) as the self-update for this version.
+#       Its download URL is the GitHub release asset, so create the release (with the exe
+#       attached) before pushing the manifest. Without -App the previous exe entry is kept.
+param([switch]$App)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $dist = Join-Path $root 'dist'
@@ -54,6 +59,23 @@ foreach ($key in $entries.Keys) {
         size    = (Get-Item $path).Length
         path    = 'dist/' + $key
     }
+}
+
+if ($App) {
+    $exe = Join-Path $root 'DiscordProxifier\bin\Release\DiscordProxifier.exe'
+    $exeVersion = ([version](Get-Item $exe).VersionInfo.FileVersion).ToString(3)
+    if ($exeVersion -ne $appVersion) { throw "Built exe is $exeVersion but AssemblyInfo says $appVersion; rebuild first" }
+    $files['DiscordProxifier.exe'] = [ordered]@{
+        version = $appVersion
+        sha256  = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+        size    = (Get-Item $exe).Length
+        url     = "https://github.com/$owner/$repo/releases/download/v$appVersion/DiscordProxifier.exe"
+    }
+} elseif ($old -and $old.files.'DiscordProxifier.exe') {
+    $files['DiscordProxifier.exe'] = $old.files.'DiscordProxifier.exe'
+    $appVersion = $old.appVersion   # keep announcing the published version, not a local build
+} elseif ($old) {
+    $appVersion = $old.appVersion
 }
 
 $manifest = [ordered]@{

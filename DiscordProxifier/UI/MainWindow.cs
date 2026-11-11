@@ -15,6 +15,10 @@ namespace DiscordUnblocker
         readonly ProxyManager proxy;
         readonly DiscordClients discord;
         readonly Updater updater;
+        ManifestFile pendingUpdate;
+
+        // Set by Program when this process was started by a self-update.
+        public bool JustUpdated { get; set; }
         List<DiscordClient> clients = new List<DiscordClient>();
         DiscordClient selected;
         ClientState clientState = ClientState.Stopped;
@@ -246,6 +250,8 @@ namespace DiscordUnblocker
             List<string> missing = await AppSetup.PrepareLocalDataAsync(logger);
             Task connecting = cfg.AutoConnect && missing.Count == 0 ? Connect() : null;
             logger.Log($"Startup ready in {clock.ElapsedMilliseconds} ms");
+            if (JustUpdated)
+                Notify(Toast.Kind.Success, L.F("toast.updated", AppSetup.AppVersion), L.T("toast.updated.sub"));
 
             await CheckUpdatesAsync(missing);
             if (connecting != null)
@@ -272,7 +278,13 @@ namespace DiscordUnblocker
                 ShowError(AppError.For("DP-502"));
 
             bool torUpdate = await Task.Run(() => updater.TorUpdateAvailable(m));
-            if (Updater.IsNewer(m.AppVersion, AppSetup.AppVersion))
+            pendingUpdate = Updater.AppUpdate(m);
+            if (pendingUpdate != null)
+            {
+                if (!errorCard.Visible)
+                    ShowError(AppError.For("UPDATE", pendingUpdate.Version));
+            }
+            else if (Updater.IsNewer(m.AppVersion, AppSetup.AppVersion))
                 Notify(Toast.Kind.Info, L.F("toast.update.app", m.AppVersion), L.T("toast.update.sub"));
             else if (torUpdate)
                 Notify(Toast.Kind.Info, L.T("toast.update.tor"), L.T("toast.update.sub"));
@@ -315,12 +327,195 @@ namespace DiscordUnblocker
             bool dll = await updater.UpdateDllAsync(m);
             if (!Updater.IsNewer(m.AppVersion, AppSetup.AppVersion))
                 return dll ? L.F("toast.dll.updated", updater.InstalledDllVersion) : L.T("update.latest");
+            ManifestFile exe = Updater.AppUpdate(m);
+            if (exe != null)
+            {
+                if (MessageBox.Show(L.F("update.confirm", exe.Version), "Discord Proxifier", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                    return L.F("UPDATE.t", exe.Version);
+                await InstallUpdateAsync(exe);
+                return L.T("update.install.failed"); // only reached when the install didn't restart the app
+            }
             try
             {
                 Process.Start(string.IsNullOrEmpty(m.AppDownload) ? UpdateSource.ReleasesPage : m.AppDownload);
             }
             catch { }
             return L.F("update.available", m.AppVersion);
+        }
+
+        // Downloads, verifies and installs the new exe, then restarts into it. On any failure the
+        // running version keeps working and the download page opens instead.
+        async Task InstallUpdateAsync(ManifestFile f)
+        {
+            Notify(Toast.Kind.Info, L.T("toast.updating"), L.F("UPDATE.t", f.Version));
+            string newExe = await updater.DownloadAppAsync(f);
+            if (newExe != null)
+            {
+                bool wasHidden = !Visible;
+                exiting = true;
+                proxy.StopNow();
+                if (updater.SwapAndRestart(newExe, wasHidden))
+                {
+                    tray.Visible = false;
+                    Application.Exit();
+                    return;
+                }
+                exiting = false;
+                await Connect();
+            }
+            Notify(Toast.Kind.Error, L.T("update.install.failed"), L.T("update.install.failed.sub"));
+            try
+            {
+                Process.Start(UpdateSource.ReleasesPage);
+            }
+            catch { }
+        }
+
+        // Settings → Repair: checks and fixes files, leftovers, Discord and the connection,
+        // showing each step live.
+        async Task RunRepairAsync(RepairWindow w)
+        {
+            bool allGood = true;
+            Action<int, int, string> done = (i, status, detail) =>
+            {
+                if (status != 0)
+                    allGood = false;
+                w.Done(i, status, detail);
+            };
+            logger.Log("Repair started");
+
+            // 1. Program files against the published checksums.
+            int s1 = w.Step(L.T("repair.files"));
+            List<string> missing = await AppSetup.PrepareLocalDataAsync(logger);
+            Manifest m = await updater.FetchManifestAsync();
+            if (m == null)
+            {
+                done(s1, missing.Count == 0 ? 1 : 2, missing.Count == 0 ? L.T("repair.files.unverified") : L.F("repair.files.missing", string.Join(", ", missing)));
+            }
+            else
+            {
+                List<string> bad = await Task.Run(() => updater.VerifyDataFiles(m));
+                if (bad.Count == 0)
+                {
+                    done(s1, 0, L.T("repair.files.ok"));
+                }
+                else
+                {
+                    if (proxy.IsRunning || proxy.IsStarting)
+                        await proxy.StopAsync(); // files in use can't be replaced
+                    var failed = new List<string>();
+                    foreach (string key in bad)
+                    {
+                        string target = System.IO.Path.Combine(AppSetup.DataDir, key.Replace('/', '\\'));
+                        bool ok = await updater.DownloadVerifiedAsync(m.Get(key), target);
+                        if (ok && key == "Tor.zip")
+                            ok = await Task.Run(() => updater.InstallTorZip(target, m.Get(key).Version));
+                        if (!ok)
+                            failed.Add(key);
+                    }
+                    done(s1, failed.Count == 0 ? 0 : 2, failed.Count == 0
+                        ? L.F("repair.files.fixed", bad.Count)
+                        : L.F("repair.files.failed", string.Join(", ", failed)));
+                }
+            }
+
+            // 2. tor/gost/wireproxy left behind by other copies.
+            int s2 = w.Step(L.T("repair.leftovers"));
+            int closed = 0;
+            foreach (Process p in proxy.FindForeignLeftovers())
+            {
+                try
+                {
+                    p.Kill();
+                    p.WaitForExit(3000);
+                    closed++;
+                }
+                catch { }
+                finally
+                {
+                    p.Dispose();
+                }
+            }
+            proxy.KillOrphans();
+            done(s2, 0, closed == 0 ? L.T("repair.leftovers.none") : L.F("repair.leftovers.closed", closed));
+
+            // 3. Discord install, proxy module, shortcuts.
+            int s3 = w.Step(L.T("repair.discord"));
+            Rescan();
+            bool restartDiscord = false;
+            if (selected == null)
+            {
+                done(s3, 2, L.T("client.none"));
+            }
+            else
+            {
+                DiscordClient c = selected;
+                bool killed = false;
+                bool ok = await Task.Run(() => discord.EnsureDll(c, out killed));
+                discord.FixProxifiedShortcuts(clients, cfg.GostPort);
+                restartDiscord = killed;
+                done(s3, ok ? 0 : 2, L.F(ok ? (killed ? "repair.discord.restarted" : "repair.discord.ok") : "repair.discord.failed", c.DisplayName));
+            }
+
+            // 4. The connection itself.
+            int s4 = w.Step(L.T("repair.conn"));
+            ProbeResult health = proxy.IsRunning ? await proxy.HealthCheckAsync() : null;
+            if (health == null || !health.Ok)
+                await Connect();
+            if (proxy.IsRunning)
+                done(s4, 0, L.F("repair.conn.ok", ProxyModes.Display(mode)));
+            else
+                done(s4, 2, L.T("repair.conn.failed"));
+            if (restartDiscord && proxy.IsRunning)
+                await LaunchSelected();
+
+            logger.Log("Repair finished" + (allGood ? "" : " with problems"));
+            w.Finish(allGood);
+        }
+
+        async Task OpenRepair()
+        {
+            using (var w = new RepairWindow())
+            {
+                w.ReportClicked = async b =>
+                {
+                    b.Enabled = false;
+                    string result = await CreateReport();
+                    b.Text = result;
+                    b.Width = b.PreferredWidth();
+                };
+                w.Shown += async (s, e) => await RunRepairAsync(w);
+                w.ShowDialog(this);
+            }
+            await Task.CompletedTask;
+        }
+
+        // Writes the diagnostic report to the desktop and selects it in Explorer.
+        async Task<string> CreateReport()
+        {
+            var ctx = new Diagnostics.Context
+            {
+                Config = cfg,
+                Proxy = proxy,
+                Discord = discord,
+                Clients = clients,
+                Selected = selected,
+                Updater = updater,
+                Logger = logger
+            };
+            try
+            {
+                string text = await Task.Run(() => Diagnostics.BuildReportAsync(ctx));
+                string path = Diagnostics.Save(text);
+                logger.Log("Diagnostic report saved: " + Diagnostics.Mask(path));
+                Process.Start("explorer.exe", "/select,\"" + path + "\"");
+                return L.T("report.saved");
+            }
+            catch (Exception ex)
+            {
+                logger.Log("Could not create the report: " + ex.Message, LogType.ERROR);
+                return L.T("update.failed");
+            }
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -581,7 +776,7 @@ namespace DiscordUnblocker
         void RefreshStatus()
         {
             string modeName = ProxyModes.Display(mode);
-            AppError err = errorCard.Visible ? errorCard.Error : null;
+            AppError err = errorCard.Visible && errorCard.Error != null && !errorCard.Error.IsInfo ? errorCard.Error : null;
             string title, sub;
             if (proxy.IsStarting)
             {
@@ -666,7 +861,12 @@ namespace DiscordUnblocker
             DoLayout();
             RefreshStatus();
             if (!Visible || WindowState == FormWindowState.Minimized)
-                tray.ShowBalloonTip(5000, e.Code + " · " + e.Title, e.Description, ToolTipIcon.Error);
+            {
+                if (e.IsInfo)
+                    tray.ShowBalloonTip(5000, e.Title, e.Description, ToolTipIcon.Info);
+                else
+                    tray.ShowBalloonTip(5000, e.Code + " · " + e.Title, e.Description, ToolTipIcon.Error);
+            }
         }
 
         // ---------------- proxy ----------------
@@ -857,6 +1057,21 @@ namespace DiscordUnblocker
                     Rescan();
                     if (selected != null)
                         errorCard.Collapse();
+                    break;
+                case ErrorAction.InstallUpdate:
+                    if (pendingUpdate != null)
+                        await InstallUpdateAsync(pendingUpdate);
+                    break;
+                case ErrorAction.ReleaseNotes:
+                    try
+                    {
+                        Process.Start(UpdateSource.ReleasesPage);
+                    }
+                    catch { }
+                    break;
+                case ErrorAction.Repair:
+                    errorCard.Collapse();
+                    await OpenRepair();
                     break;
                 case ErrorAction.RetryDll:
                     Manifest m = await updater.FetchManifestAsync();
@@ -1083,7 +1298,9 @@ namespace DiscordUnblocker
             {
                 TorVersion = () => updater.InstalledTorVersion(),
                 TorUpdate = UpdateTor,
-                AppUpdate = CheckAppUpdate
+                AppUpdate = CheckAppUpdate,
+                Repair = OpenRepair,
+                Report = CreateReport
             })
                 w.ShowDialog(this);
 

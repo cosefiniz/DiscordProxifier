@@ -29,4 +29,7 @@ foreach ($f in 'Tor.zip', 'gost.exe', 'wgcf.exe', 'wireproxy.exe', 'DllVer', 'x6
 $zip = Join-Path $out "$name.zip"
 New-PortableZip $stage $zip "$name/"
 Remove-Item $stage -Recurse -Force
+# The bare exe is attached to the release as well: the app's self-update downloads it.
+Copy-Item (Join-Path $bin 'DiscordProxifier.exe') (Join-Path $out 'DiscordProxifier.exe') -Force
 Write-Host "Package: $zip"
+Write-Host "Self-update exe: $(Join-Path $out 'DiscordProxifier.exe')"

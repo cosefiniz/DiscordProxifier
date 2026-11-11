@@ -644,11 +644,13 @@ namespace DiscordUnblocker
         }
 
         public AppError Error => error;
+        Color CardBg => error != null && error.IsInfo ? Theme.InfoBg : Theme.DangerBg;
         public int CurrentHeight => (int)(fullHeight * open);
 
         public void ShowError(AppError e)
         {
             error = e;
+            BackColor = CardBg;
             foreach (FlatButton b in buttons)
             {
                 Controls.Remove(b);
@@ -657,7 +659,7 @@ namespace DiscordUnblocker
             buttons.Clear();
             foreach (ErrorAction a in e.Actions)
             {
-                var b = new FlatButton { Text = ActionLabel(a), Font = Theme.Small, BackColor = Theme.DangerBg };
+                var b = new FlatButton { Text = ActionLabel(a), Font = Theme.Small, BackColor = CardBg };
                 b.Height = Theme.S(28);
                 b.Width = b.PreferredWidth();
                 ErrorAction act = a;
@@ -729,8 +731,8 @@ namespace DiscordUnblocker
             g.Clear(Parent != null ? Parent.BackColor : Theme.Bg);
             Theme.Smooth(g);
             using (GraphicsPath p = Theme.Round(new RectangleF(0.5f, 0.5f, Width - 1.5f, Math.Max(2, fullHeight) - 1.5f), Theme.S(10)))
-            using (var b = new SolidBrush(Theme.DangerBg))
-            using (var pen = new Pen(Theme.DangerBorder))
+            using (var b = new SolidBrush(CardBg))
+            using (var pen = new Pen(error != null && error.IsInfo ? Theme.InfoBorder : Theme.DangerBorder))
             {
                 g.FillPath(b, p);
                 g.DrawPath(pen, p);
@@ -743,12 +745,13 @@ namespace DiscordUnblocker
                 return;
             Graphics g = e.Graphics;
             int pad = Theme.S(14);
-            Theme.DrawText(g, Theme.Glyph.Warning, Theme.Icons(12), new Rectangle(pad, pad, Theme.S(22), Theme.S(24)), Theme.Danger, TextFormatFlags.VerticalCenter);
-            int codeW = TextRenderer.MeasureText(error.Code, Theme.Mono).Width;
+            Color accent = error.IsInfo ? Theme.Accent : Theme.Danger;
+            Theme.DrawText(g, error.IsInfo ? Theme.Glyph.Info : Theme.Glyph.Warning, Theme.Icons(12), new Rectangle(pad, pad, Theme.S(22), Theme.S(24)), accent, TextFormatFlags.VerticalCenter);
+            int codeW = TextRenderer.MeasureText(error.DisplayCode, Theme.Mono).Width;
             Theme.DrawText(g, error.Title, Theme.Strong, new Rectangle(pad + Theme.S(26), pad, Width - pad * 2 - Theme.S(26) - codeW - Theme.S(30), Theme.S(24)), Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-            Theme.DrawText(g, error.Code, Theme.Mono, new Rectangle(Width - pad - Theme.S(30) - codeW, pad, codeW, Theme.S(24)), Theme.Danger, TextFormatFlags.VerticalCenter);
+            Theme.DrawText(g, error.DisplayCode, Theme.Mono, new Rectangle(Width - pad - Theme.S(30) - codeW, pad, codeW, Theme.S(24)), accent, TextFormatFlags.VerticalCenter);
             int textW = Width - pad * 2;
-            Theme.DrawText(g, error.Description, Theme.Small, new Rectangle(pad, pad + Theme.S(30), textW, 400), Color.FromArgb(214, 198, 199), TextFormatFlags.WordBreak);
+            Theme.DrawText(g, error.Description, Theme.Small, new Rectangle(pad, pad + Theme.S(30), textW, 400), error.IsInfo ? Theme.InfoText : Theme.DangerText, TextFormatFlags.WordBreak);
         }
 
         protected override void OnResize(EventArgs e)

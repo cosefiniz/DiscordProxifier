@@ -29,6 +29,10 @@ namespace DiscordUnblocker
         public static readonly Color DangerBg = Color.FromArgb(42, 29, 31);
         public static readonly Color DangerBorder = Color.FromArgb(92, 43, 47);
         public static readonly Color Idle = Color.FromArgb(107, 111, 118);
+        public static readonly Color InfoBg = Color.FromArgb(30, 33, 50);
+        public static readonly Color InfoBorder = Color.FromArgb(62, 72, 128);
+        public static readonly Color InfoText = Color.FromArgb(200, 206, 232);
+        public static readonly Color DangerText = Color.FromArgb(214, 198, 199);
 
         public static readonly Font Body = new Font("Segoe UI", 9.5f);
         public static readonly Font Small = new Font("Segoe UI", 8.5f);

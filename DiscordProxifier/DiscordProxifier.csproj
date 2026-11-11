@@ -192,6 +192,7 @@
     <Compile Include="Core\AppSetup.cs" />
     <Compile Include="Core\Configuration.cs" />
     <Compile Include="Core\DirectBackend.cs" />
+    <Compile Include="Core\Diagnostics.cs" />
     <Compile Include="Core\DiscordClients.cs" />
     <Compile Include="Core\Errors.cs" />
     <Compile Include="Core\Logger.cs" />
@@ -205,6 +206,9 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="UI\MainWindow.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\RepairWindow.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="UI\SettingsWindow.cs">

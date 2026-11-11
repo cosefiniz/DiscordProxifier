@@ -15,7 +15,10 @@ namespace DiscordUnblocker
         BrowseDiscord,
         RescanDiscord,
         RetryDll,
-        NewCircuit
+        NewCircuit,
+        InstallUpdate,
+        ReleaseNotes,
+        Repair
     }
 
     // A user-facing problem: a stable code (DP-xxx), an argument for the localized
@@ -26,7 +29,12 @@ namespace DiscordUnblocker
         public string Arg;
         public ErrorAction[] Actions;
 
-        public string Title => L.T(Code + ".t");
+        // Info cards (e.g. an available update) use the accent colour and show the argument
+        // instead of a DP code.
+        public bool IsInfo;
+
+        public string Title => string.Format(L.T(Code + ".t"), Arg ?? "");
+        public string DisplayCode => IsInfo ? (string.IsNullOrEmpty(Arg) ? "" : "v" + Arg) : Code;
         public string Description => string.Format(L.T(Code + ".d"), Arg ?? "");
 
         public AppError(string code, string arg, params ErrorAction[] actions)
@@ -66,10 +74,14 @@ namespace DiscordUnblocker
                     return new AppError(code, arg, ErrorAction.SwitchMode, ErrorAction.Retry);
                 case "DP-602":
                     return new AppError(code, arg, ErrorAction.SwitchMode, ErrorAction.Retry);
+                case "UPDATE":
+                    return new AppError(code, arg, ErrorAction.InstallUpdate, ErrorAction.ReleaseNotes) { IsInfo = true };
                 case "DP-501":
-                    return new AppError(code, arg, ErrorAction.BrowseDiscord, ErrorAction.RescanDiscord);
+                    return new AppError(code, arg, ErrorAction.BrowseDiscord, ErrorAction.Repair);
                 case "DP-502":
-                    return new AppError(code, arg, ErrorAction.RetryDll, ErrorAction.OpenLogs);
+                    return new AppError(code, arg, ErrorAction.Repair, ErrorAction.OpenLogs);
+                case "DP-503":
+                    return new AppError(code, arg, ErrorAction.Repair, ErrorAction.OpenLogs);
                 default:
                     return new AppError(code, arg, ErrorAction.Retry, ErrorAction.OpenLogs);
             }

@@ -91,7 +91,9 @@ Antivirüsünüzü kapatmayın; yalnızca bu klasörü dışlamak yeterli. Uygul
 
 ## Updates
 
-The app reads [`dist/manifest.json`](dist/manifest.json) from this repo and installs files from `dist/` only when their SHA256 matches. version.dll updates automatically; Tor updates from **Settings → Update Tor**.
+The app reads [`dist/manifest.json`](dist/manifest.json) from this repo and installs files only when their SHA256 matches. version.dll updates automatically; Tor updates from **Settings → Update Tor**; a new app version shows a card with **Install now**, which downloads the exe from the GitHub release, checks it, swaps it in and restarts (Discord stays open).
+
+If something doesn't work: **Settings → Troubleshooting → Repair** checks the files, Discord and the connection and fixes what it can; **Create report** saves a text file to the desktop that shows what your provider blocks. Send that file when asking for help (personal paths and keys are not included).
 
 Maintainer scripts (PowerShell, in `tools/`):
 
@@ -102,7 +104,11 @@ Maintainer scripts (PowerShell, in `tools/`):
 | `update-manifest.ps1` | Rebuilds `dist/manifest.json` (run by the two scripts above) |
 | `build-package.ps1` | Builds the exe and the release zip into `out/` |
 
-After an update script: commit and push. After a new app version: bump `AssemblyVersion`, run `update-manifest.ps1` and `build-package.ps1`, push, and attach the zip to a new GitHub Release.
+After an update script: commit and push. New app version:
+
+1. Bump `AssemblyVersion` / `AssemblyFileVersion` and run `build-package.ps1` (writes `out/DiscordProxifier-vX.Y.Z.zip` and `out/DiscordProxifier.exe`).
+2. `gh release create vX.Y.Z out/DiscordProxifier-vX.Y.Z.zip out/DiscordProxifier.exe` — the bare exe is what in-app updates download.
+3. `update-manifest.ps1 -App`, then commit and push. Push the manifest only after the release exists.
 
 ## Build
 

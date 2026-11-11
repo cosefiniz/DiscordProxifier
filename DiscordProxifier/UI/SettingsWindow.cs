@@ -51,8 +51,12 @@ namespace DiscordUnblocker
         readonly ToggleSwitch startup, launchAfter, shortcuts, fallback;
         readonly ThemedTextBox endpoint, bridges, httpPort, socksPort;
         readonly FlatButton done, openFolder, makeShortcut;
-        readonly TextLine hUpdates, lTor, sTor, lApp, sApp;
-        readonly FlatButton bTor, bApp;
+        readonly TextLine hUpdates, lTor, sTor, lApp, sApp, hTrouble, sTrouble;
+        readonly FlatButton bTor, bApp, bRepair, bReport;
+
+        // Provided by MainWindow.
+        public Func<Task> Repair;
+        public Func<Task<string>> Report;
 
         // Provided by MainWindow; they return a short status line for the Updates section.
         public Func<string> TorVersion;
@@ -126,6 +130,28 @@ namespace DiscordUnblocker
             bApp.Click += async (s, e) => await RunUpdate(bApp, sApp, AppUpdate);
             Controls.Add(bTor);
             Controls.Add(bApp);
+
+            hTrouble = Header();
+            sTrouble = Muted(true);
+            sTrouble.Flags = TextFormatFlags.WordBreak;
+            bRepair = new FlatButton { Glyph = Theme.Glyph.Settings, Font = Theme.Small, Height = Theme.S(30) };
+            bRepair.Click += async (s, e) =>
+            {
+                if (Repair != null)
+                    await Repair();
+            };
+            bReport = new FlatButton { Glyph = Theme.Glyph.Logs, Font = Theme.Small, Height = Theme.S(30) };
+            bReport.Click += async (s, e) =>
+            {
+                if (Report == null)
+                    return;
+                bReport.Enabled = false;
+                sTrouble.Text = L.T("report.building");
+                sTrouble.Text = await Report();
+                bReport.Enabled = true;
+            };
+            Controls.Add(bRepair);
+            Controls.Add(bReport);
 
             hAdvanced = Header();
             lHttp = Muted();
@@ -269,6 +295,10 @@ namespace DiscordUnblocker
             bTor.Text = L.T("settings.tor.check");
             bApp.Text = L.T("settings.app.check");
             RefreshVersions();
+            hTrouble.Text = L.T("settings.trouble");
+            sTrouble.Text = L.T("settings.trouble.hint");
+            bRepair.Text = L.T("settings.repair");
+            bReport.Text = L.T("settings.report");
             hAdvanced.Text = L.T("settings.advanced");
             lHttp.Text = L.T("settings.port.http");
             lSocks.Text = L.T("settings.port.socks");
@@ -283,23 +313,29 @@ namespace DiscordUnblocker
             Invalidate();
         }
 
+        // Two columns so the window fits on small laptop screens:
+        // left = General, Updates, Troubleshooting; right = WARP, Tor, Advanced.
         void DoLayout()
         {
             int pad = Theme.S(18);
-            int w = Theme.S(420);
-            int inner = w - pad * 2;
-            int y = TitleHeight + Theme.S(14);
+            int gap = Theme.S(30);
+            int inner = Theme.S(384);
+            int w = pad * 2 + inner * 2 + gap;
+            int top = TitleHeight + Theme.S(14);
 
+            // ---- left column ----
+            int x = pad;
+            int y = top;
             Action<Control, int> place = (c, h) =>
             {
-                c.SetBounds(pad, y, inner, h);
+                c.SetBounds(x, y, inner, h);
                 y += h;
             };
 
             place(hGeneral, Theme.S(24));
             y += Theme.S(6);
-            lLanguage.SetBounds(pad, y + Theme.S(6), Theme.S(120), Theme.S(22));
-            language.SetBounds(pad + inner - Theme.S(210), y, Theme.S(210), Theme.S(34));
+            lLanguage.SetBounds(x, y + Theme.S(6), Theme.S(120), Theme.S(22));
+            language.SetBounds(x + inner - Theme.S(210), y, Theme.S(210), Theme.S(34));
             y += Theme.S(44);
             place(startup, Theme.S(26));
             y += Theme.S(6);
@@ -308,9 +344,35 @@ namespace DiscordUnblocker
             place(shortcuts, Theme.S(26));
             y += Theme.S(10);
             makeShortcut.Width = makeShortcut.PreferredWidth();
-            makeShortcut.Location = new Point(pad, y);
+            makeShortcut.Location = new Point(x, y);
             y += Theme.S(30) + Theme.S(18);
 
+            place(hUpdates, Theme.S(24));
+            y += Theme.S(8);
+            foreach (var row in new[] { Tuple.Create(lTor, sTor, bTor), Tuple.Create(lApp, sApp, bApp) })
+            {
+                row.Item3.Width = row.Item3.PreferredWidth();
+                row.Item3.Location = new Point(x + inner - row.Item3.Width, y + Theme.S(4));
+                int textW = inner - row.Item3.Width - Theme.S(10);
+                row.Item1.SetBounds(x, y, textW, Theme.S(20));
+                row.Item2.SetBounds(x, y + Theme.S(20), textW, Theme.S(18));
+                y += Theme.S(44);
+            }
+            y += Theme.S(12);
+
+            place(hTrouble, Theme.S(24));
+            y += Theme.S(6);
+            bRepair.Width = bRepair.PreferredWidth();
+            bReport.Width = bReport.PreferredWidth();
+            bRepair.Location = new Point(x, y);
+            bReport.Location = new Point(bRepair.Right + Theme.S(8), y);
+            y += Theme.S(36);
+            place(sTrouble, Theme.S(34));
+            int leftBottom = y;
+
+            // ---- right column ----
+            x = pad + inner + gap;
+            y = top;
             place(hWarp, Theme.S(24));
             y += Theme.S(6);
             place(fallback, Theme.S(26));
@@ -318,8 +380,8 @@ namespace DiscordUnblocker
             place(lEndpoint, Theme.S(22));
             place(endpoint, Theme.S(32));
             y += Theme.S(2);
-            hintEndpoint.SetBounds(pad, y, inner / 2 + Theme.S(60), Theme.S(18));
-            endpointError.SetBounds(pad + inner / 2 + Theme.S(60), y, inner / 2 - Theme.S(60), Theme.S(18));
+            hintEndpoint.SetBounds(x, y, inner / 2 + Theme.S(60), Theme.S(18));
+            endpointError.SetBounds(x + inner / 2 + Theme.S(60), y, inner / 2 - Theme.S(60), Theme.S(18));
             endpointError.Flags = TextFormatFlags.Right | TextFormatFlags.VerticalCenter;
             y += Theme.S(18) + Theme.S(16);
 
@@ -331,36 +393,23 @@ namespace DiscordUnblocker
             place(hintBridges, Theme.S(18));
             y += Theme.S(16);
 
-            place(hUpdates, Theme.S(24));
-            y += Theme.S(8);
-            foreach (var row in new[] { Tuple.Create(lTor, sTor, bTor), Tuple.Create(lApp, sApp, bApp) })
-            {
-                row.Item3.Width = row.Item3.PreferredWidth();
-                row.Item3.Location = new Point(pad + inner - row.Item3.Width, y + Theme.S(4));
-                int textW = inner - row.Item3.Width - Theme.S(10);
-                row.Item1.SetBounds(pad, y, textW, Theme.S(20));
-                row.Item2.SetBounds(pad, y + Theme.S(20), textW, Theme.S(18));
-                y += Theme.S(44);
-            }
-            y += Theme.S(12);
-
             place(hAdvanced, Theme.S(24));
             y += Theme.S(6);
             int half = (inner - Theme.S(12)) / 2;
-            lHttp.SetBounds(pad, y, half, Theme.S(22));
-            lSocks.SetBounds(pad + half + Theme.S(12), y, half, Theme.S(22));
+            lHttp.SetBounds(x, y, half, Theme.S(22));
+            lSocks.SetBounds(x + half + Theme.S(12), y, half, Theme.S(22));
             y += Theme.S(22);
-            httpPort.SetBounds(pad, y, half, Theme.S(32));
-            socksPort.SetBounds(pad + half + Theme.S(12), y, half, Theme.S(32));
+            httpPort.SetBounds(x, y, half, Theme.S(32));
+            socksPort.SetBounds(x + half + Theme.S(12), y, half, Theme.S(32));
             y += Theme.S(34);
             place(portError, Theme.S(18));
-            y += Theme.S(14);
 
-            place(footer, Theme.S(18));
-            y += Theme.S(10);
+            // ---- footer, full width ----
+            y = Math.Max(leftBottom, y) + Theme.S(18);
+            footer.SetBounds(pad, y + Theme.S(6), w - pad * 2 - Theme.S(320), Theme.S(18));
             done.Width = Math.Max(Theme.S(80), done.PreferredWidth());
             openFolder.Width = openFolder.PreferredWidth();
-            done.Location = new Point(pad + inner - done.Width, y);
+            done.Location = new Point(w - pad - done.Width, y);
             openFolder.Location = new Point(done.Left - Theme.S(8) - openFolder.Width, y);
             y += Theme.S(30) + pad;
             ClientSize = new Size(w, y);
