@@ -31,11 +31,23 @@ namespace DiscordUnblocker
         TcpListener listener;
         CancellationTokenSource cts;
         readonly HashSet<string> reported = new HashSet<string>();
+        readonly ConcurrentDictionary<TcpClient, byte> open = new ConcurrentDictionary<TcpClient, byte>();
+
+        // TLS 1.2 clients can't use the split trick: in TLS 1.2 the server certificate is sent in
+        // clear text and the filter cuts the reply when it sees a Discord name in it. Discord's
+        // own traffic (Chromium) is TLS 1.3, but its updater (updater.node, Windows SChannel on
+        // Windows 10) is TLS 1.2 and would hang on "Checking for updates". Those connections go
+        // through a helper route (WARP if set up, otherwise Tor) started in the background.
+        ProxyBackend helper;
+        int helperPort;
+        TaskCompletionSource<bool> helperReady;
 
         // Set when name resolution over DoH failed for the probe host (DP-602 vs DP-601).
         public bool DnsFailed { get; private set; }
 
-        public override bool IsAlive => listener != null && cts != null && !cts.IsCancellationRequested;
+        public string HelperName => helper?.Name;
+
+        public override bool IsAlive => listener != null;
 
         public override Task StartAsync(int socksPort, Configuration cfg, CancellationToken ct)
         {
@@ -45,21 +57,134 @@ namespace DiscordUnblocker
             listener = new TcpListener(IPAddress.Loopback, socksPort);
             listener.Start(256);
             logger.Log($"Direct: listening on 127.0.0.1:{socksPort} (DoH + TLS record split)");
-            Task.Run(() => AcceptLoop(cts.Token));
+            CancellationToken token = cts.Token;
+            Task.Run(() => AcceptLoop(token));
+
+            helperReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            helperPort = FreePortNear(socksPort, int.Parse(cfg.GostPort));
+            Task.Run(() => StartHelperAsync(cfg, token));
             return Task.FromResult(true);
+        }
+
+        static int FreePortNear(int socksPort, int gostPort)
+        {
+            for (int p = socksPort + 1; p < socksPort + 40; p++)
+                if (p != gostPort && !IsPortOpen(p))
+                    return p;
+            return socksPort + 41;
+        }
+
+        async Task StartHelperAsync(Configuration cfg, CancellationToken ct)
+        {
+            var order = new List<Func<ProxyBackend>>();
+            if (cfg.WarpTosAccepted && WarpBackend.HasAccount(dataDir))
+                order.Add(() => new WarpBackend(logger, dataDir));
+            order.Add(() => new TorBackend(logger, dataDir));
+
+            foreach (Func<ProxyBackend> make in order)
+            {
+                if (ct.IsCancellationRequested)
+                    break;
+                ProxyBackend b = make();
+                try
+                {
+                    await b.StartAsync(helperPort, cfg, ct);
+                    if (await HelperWorks(helperPort, ct))
+                    {
+                        helper = b;
+                        logger.Log($"Direct: TLS 1.2 connections (Discord updater) go through {b.Name} on port {helperPort}");
+                        helperReady.TrySetResult(true);
+                        return;
+                    }
+                    logger.Log($"Direct: helper {b.Name} started but can't reach Discord", LogType.WARNING);
+                }
+                catch (Exception ex) when (!(ex is OperationCanceledException))
+                {
+                    logger.Log($"Direct: helper {b.Name} failed: {ex.Message}", LogType.WARNING);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                b.Stop();
+            }
+            if (!ct.IsCancellationRequested)
+                logger.Log("Direct: no helper route; Discord's updater may stay on \"Checking for updates\". Use WARP or Tor instead.", LogType.ERROR);
+            helperReady.TrySetResult(false);
+        }
+
+        // A helper is usable when a TLS 1.3 handshake with updates.discord.com completes through it.
+        static async Task<bool> HelperWorks(int port, CancellationToken ct)
+        {
+            for (int attempt = 0; attempt < 6 && !ct.IsCancellationRequested; attempt++)
+            {
+                try
+                {
+                    using (var c = new TcpClient { NoDelay = true })
+                    {
+                        NetworkStream s = await SocksConnect(c, port, "updates.discord.com", 443);
+                        if (s != null && await TlsProbe.HandshakeAsync(s, "updates.discord.com", TimeSpan.FromSeconds(15), ct))
+                            return true;
+                    }
+                }
+                catch { }
+                await Task.Delay(3000, ct);
+            }
+            return false;
+        }
+
+        // Opens a SOCKS5 CONNECT through a local SOCKS server; null if refused.
+        static async Task<NetworkStream> SocksConnect(TcpClient c, int socksPort, string host, int port)
+        {
+            await c.ConnectAsync(IPAddress.Loopback, socksPort);
+            NetworkStream s = c.GetStream();
+            await s.WriteAsync(new byte[] { 5, 1, 0 }, 0, 3);
+            byte[] method = await ReadExact(s, 2);
+            if (method[1] != 0)
+                return null;
+            byte[] name = Encoding.ASCII.GetBytes(host);
+            byte[] req = new byte[] { 5, 1, 0, 3, (byte)name.Length }
+                .Concat(name)
+                .Concat(new[] { (byte)(port >> 8), (byte)port })
+                .ToArray();
+            await s.WriteAsync(req, 0, req.Length);
+            byte[] reply = await ReadExact(s, 4);
+            if (reply[1] != 0)
+                return null;
+            int skip = reply[3] == 1 ? 4 : reply[3] == 4 ? 16 : (await ReadExact(s, 1))[0];
+            await ReadExact(s, skip + 2);
+            return s;
         }
 
         public override void Stop()
         {
-            if (listener == null)
+            TcpListener l = listener;
+            listener = null;
+            if (l == null)
                 return;
+            // Close the listening socket first: cancelling can throw from registered callbacks
+            // while Discord connections are open, which used to leave the port taken (DP-101).
+            try
+            {
+                l.Stop();
+            }
+            catch { }
             try
             {
                 cts.Cancel();
-                listener.Stop();
             }
             catch { }
-            listener = null;
+            helper?.Stop();
+            helper = null;
+            helperReady?.TrySetResult(false);
+            foreach (TcpClient c in open.Keys.ToList())
+            {
+                try
+                {
+                    c.Close();
+                }
+                catch { }
+            }
+            open.Clear();
             logger.Log("Direct stopped");
         }
 
@@ -70,7 +195,10 @@ namespace DiscordUnblocker
                 TcpClient client;
                 try
                 {
-                    client = await listener.AcceptTcpClientAsync();
+                    TcpListener l = listener;
+                    if (l == null)
+                        return;
+                    client = await l.AcceptTcpClientAsync();
                 }
                 catch
                 {
@@ -80,138 +208,215 @@ namespace DiscordUnblocker
             }
         }
 
-        void Report(string key, string message)
+        void Report(string key, string message, LogType type = LogType.WARNING)
         {
             lock (reported)
             {
                 if (!reported.Add(key))
                     return;
             }
-            logger.Log("Direct: " + message, LogType.WARNING);
+            logger.Log("Direct: " + message, type);
         }
 
         async Task Serve(TcpClient client, CancellationToken ct)
         {
-            using (client)
+            open[client] = 0;
+            TcpClient remote = null;
+            string host = null;
+            try
             {
                 client.NoDelay = true;
                 NetworkStream local = client.GetStream();
-                string host = null;
-                try
-                {
-                    // SOCKS5 greeting: no authentication.
-                    byte[] head = await ReadExact(local, 2);
-                    await ReadExact(local, head[1]);
-                    await local.WriteAsync(new byte[] { 5, 0 }, 0, 2);
 
-                    // CONNECT request.
-                    byte[] req = await ReadExact(local, 4);
-                    if (req[1] != 1)
+                // SOCKS5 greeting: no authentication.
+                byte[] head = await ReadExact(local, 2);
+                await ReadExact(local, head[1]);
+                await local.WriteAsync(new byte[] { 5, 0 }, 0, 2);
+
+                // CONNECT request.
+                byte[] req = await ReadExact(local, 4);
+                if (req[1] != 1)
+                {
+                    await Reply(local, 7); // command not supported
+                    return;
+                }
+                IPAddress literal = null;
+                switch (req[3])
+                {
+                    case 1:
+                        literal = new IPAddress(await ReadExact(local, 4));
+                        break;
+                    case 4:
+                        literal = new IPAddress(await ReadExact(local, 16));
+                        break;
+                    case 3:
+                        byte[] len = await ReadExact(local, 1);
+                        host = Encoding.ASCII.GetString(await ReadExact(local, len[0]));
+                        break;
+                    default:
+                        await Reply(local, 8);
+                        return;
+                }
+                byte[] portBytes = await ReadExact(local, 2);
+                int port = (portBytes[0] << 8) | portBytes[1];
+                string target = host ?? literal.ToString();
+
+                NetworkStream up;
+                if (port == 443)
+                {
+                    // Reply first so the client sends its ClientHello; its TLS version decides the route.
+                    await Reply(local, 0);
+                    byte[] hello = await ReadRecord(local, ct);
+                    if (!OffersTls13(hello))
                     {
-                        await Reply(local, 7); // command not supported
+                        if (!await helperReady.Task)
+                        {
+                            Report("nohelper:" + target, $"{target}: TLS 1.2 client and no helper route");
+                            return;
+                        }
+                        Report("helper:" + target, $"{target}: TLS 1.2 client, sent through {helper?.Name}", LogType.NORMAL);
+                        remote = new TcpClient { NoDelay = true };
+                        open[remote] = 0;
+                        up = await SocksConnect(remote, helperPort, target, port);
+                        if (up == null)
+                            return;
+                        await up.WriteAsync(hello, 0, hello.Length, ct);
+                    }
+                    else
+                    {
+                        remote = await ConnectDirect(host, literal, port, ct);
+                        if (remote == null)
+                            return;
+                        open[remote] = 0;
+                        up = remote.GetStream();
+                        byte[] split = SplitInsideName(hello, host);
+                        await up.WriteAsync(split, 0, split.Length, ct);
+                    }
+                }
+                else
+                {
+                    remote = await ConnectDirect(host, literal, port, ct);
+                    if (remote == null)
+                    {
+                        await Reply(local, 5);
                         return;
                     }
-                    IPAddress[] targets;
-                    switch (req[3])
-                    {
-                        case 1:
-                            targets = new[] { new IPAddress(await ReadExact(local, 4)) };
-                            break;
-                        case 4:
-                            targets = new[] { new IPAddress(await ReadExact(local, 16)) };
-                            break;
-                        case 3:
-                            byte[] len = await ReadExact(local, 1);
-                            host = Encoding.ASCII.GetString(await ReadExact(local, len[0]));
-                            targets = null;
-                            break;
-                        default:
-                            await Reply(local, 8);
-                            return;
-                    }
-                    byte[] portBytes = await ReadExact(local, 2);
-                    int port = (portBytes[0] << 8) | portBytes[1];
-
-                    if (targets == null)
-                    {
-                        targets = await Doh.Resolve(host);
-                        if (targets.Length == 0)
-                        {
-                            if (host.EndsWith("discord.com"))
-                                DnsFailed = true;
-                            Report("dns:" + host, $"could not resolve {host} over DoH");
-                            await Reply(local, 4); // host unreachable
-                            return;
-                        }
-                    }
-
-                    lock (reported)
-                    {
-                        if (reported.Add("route:" + (host ?? targets[0].ToString())))
-                            logger.Log($"Direct: {(host != null ? host : "(address)")}:{port} -> {targets[0]}");
-                    }
-
-                    var remote = new TcpClient(targets[0].AddressFamily) { NoDelay = true };
-                    using (remote)
-                    {
-                        Task connect = remote.ConnectAsync(targets, port);
-                        if (await Task.WhenAny(connect, Task.Delay(8000, ct)) != connect || connect.IsFaulted)
-                        {
-                            Report("conn:" + host + port, $"could not connect to {host ?? targets[0].ToString()}:{port}");
-                            await Reply(local, 5);
-                            return;
-                        }
-                        await Reply(local, 0);
-                        NetworkStream up = remote.GetStream();
-
-                        if (port == 443)
-                            await ForwardFirstRecord(local, up, host);
-
-                        Task a = Pump(local, up, ct);
-                        Task b = Pump(up, local, ct);
-                        await Task.WhenAny(a, b);
-                    }
+                    open[remote] = 0;
+                    await Reply(local, 0);
+                    up = remote.GetStream();
                 }
-                catch (Exception ex) when (!(ex is OperationCanceledException))
+
+                Task a = Pump(local, up, ct);
+                Task b = Pump(up, local, ct);
+                await Task.WhenAny(a, b);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException) && !(ex is ObjectDisposedException))
+            {
+                if (host != null)
+                    Report("err:" + host + ex.GetType().Name, $"{host}: {ex.Message}");
+            }
+            catch
+            {
+            }
+            finally
+            {
+                if (remote != null)
                 {
-                    if (host != null)
-                        Report("err:" + host + ex.GetType().Name, $"{host}: {ex.Message}");
+                    byte unused;
+                    open.TryRemove(remote, out unused);
+                    remote.Close();
                 }
+                byte gone;
+                open.TryRemove(client, out gone);
+                client.Close();
             }
         }
 
-        // Reads the client's first TLS record (the ClientHello) and sends it to the server as
-        // two records split inside the host name, which the SNI filter does not reassemble.
-        static async Task ForwardFirstRecord(NetworkStream client, NetworkStream server, string host)
+        async Task<TcpClient> ConnectDirect(string host, IPAddress literal, int port, CancellationToken ct)
         {
-            byte[] header = await ReadExact(client, 5);
-            int length = (header[3] << 8) | header[4];
-            byte[] payload = await ReadExact(client, length);
-            byte[] record = header.Concat(payload).ToArray();
+            IPAddress[] targets = literal != null ? new[] { literal } : await Doh.Resolve(host);
+            if (targets.Length == 0)
+            {
+                if (host != null && host.EndsWith("discord.com"))
+                    DnsFailed = true;
+                Report("dns:" + host, $"could not resolve {host} over DoH");
+                return null;
+            }
+            Report("route:" + (host ?? targets[0].ToString()), $"{host ?? "(address)"}:{port} -> {targets[0]}", LogType.NORMAL);
+            var remote = new TcpClient(targets[0].AddressFamily) { NoDelay = true };
+            Task connect = remote.ConnectAsync(targets, port);
+            if (await Task.WhenAny(connect, Task.Delay(8000, ct)) != connect || connect.IsFaulted)
+            {
+                Report("conn:" + host + port, $"could not connect to {host ?? targets[0].ToString()}:{port}");
+                remote.Close();
+                return null;
+            }
+            return remote;
+        }
 
+        // True when the ClientHello's supported_versions extension offers TLS 1.3.
+        static bool OffersTls13(byte[] record)
+        {
+            try
+            {
+                if (record.Length < 48 || record[0] != 0x16 || record[5] != 0x01)
+                    return false;
+                int p = 5 + 4 + 2 + 32; // record header, handshake header, version, random
+                p += 1 + record[p]; // session id
+                p += 2 + ((record[p] << 8) | record[p + 1]); // cipher suites
+                p += 1 + record[p]; // compression methods
+                int end = p + 2 + ((record[p] << 8) | record[p + 1]);
+                p += 2;
+                while (p + 4 <= end && p + 4 <= record.Length)
+                {
+                    int type = (record[p] << 8) | record[p + 1];
+                    int len = (record[p + 2] << 8) | record[p + 3];
+                    if (type == 0x002b)
+                    {
+                        for (int i = p + 5; i + 1 < p + 4 + len; i += 2)
+                            if (record[i] == 3 && record[i + 1] == 4)
+                                return true;
+                        return false;
+                    }
+                    p += 4 + len;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        static async Task<byte[]> ReadRecord(NetworkStream s, CancellationToken ct)
+        {
+            byte[] header = await ReadExact(s, 5);
+            byte[] payload = await ReadExact(s, (header[3] << 8) | header[4]);
+            return header.Concat(payload).ToArray();
+        }
+
+        // Re-frames one TLS record as two records split inside the host name, which the SNI
+        // filter does not reassemble. Returns the record unchanged when the name isn't found.
+        static byte[] SplitInsideName(byte[] record, string host)
+        {
+            byte[] payload = record.Skip(5).ToArray();
             int at = -1;
-            if (header[0] == 0x16 && host != null)
+            if (record[0] == 0x16 && host != null)
             {
                 int sni = IndexOf(payload, Encoding.ASCII.GetBytes(host));
                 if (sni > 0)
-                    at = sni + 2; // cut inside the name
+                    at = sni + 2;
             }
             if (at <= 0 || at >= payload.Length)
-            {
-                await server.WriteAsync(record, 0, record.Length);
-                return;
-            }
+                return record;
             byte[] split = new byte[record.Length + 5];
-            Buffer.BlockCopy(header, 0, split, 0, 3);
+            Buffer.BlockCopy(record, 0, split, 0, 3);
             split[3] = (byte)(at >> 8);
             split[4] = (byte)at;
             Buffer.BlockCopy(payload, 0, split, 5, at);
             int rest = payload.Length - at;
-            Buffer.BlockCopy(header, 0, split, 5 + at, 3);
+            Buffer.BlockCopy(record, 0, split, 5 + at, 3);
             split[5 + at + 3] = (byte)(rest >> 8);
             split[5 + at + 4] = (byte)rest;
             Buffer.BlockCopy(payload, at, split, 10 + at, rest);
-            await server.WriteAsync(split, 0, split.Length);
+            return split;
         }
 
         static int IndexOf(byte[] data, byte[] needle)
@@ -304,6 +509,34 @@ namespace DiscordUnblocker
                 .ToArray();
             byte[] hs = new byte[] { 1, (byte)(body.Length >> 16), (byte)(body.Length >> 8), (byte)body.Length }.Concat(body).ToArray();
             return new byte[] { 0x16, 3, 1 }.Concat(U16(hs.Length)).Concat(hs).ToArray();
+        }
+
+        // TLS 1.3 handshake on an already open tunnel: ServerHello plus one encrypted record.
+        public static async Task<bool> HandshakeAsync(NetworkStream s, string host, TimeSpan timeout, CancellationToken ct)
+        {
+            using (var t = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                t.CancelAfter(timeout);
+                using (t.Token.Register(() => s.Close()))
+                {
+                    try
+                    {
+                        byte[] hello = ClientHello(host);
+                        await s.WriteAsync(hello, 0, hello.Length, t.Token);
+                        byte[] rec = await ReadRecord(s, t.Token);
+                        if (rec[0] != 0x16 || rec[5] != 0x02)
+                            return false;
+                        byte[] next = await ReadRecord(s, t.Token);
+                        if (next[0] == 0x14)
+                            next = await ReadRecord(s, t.Token);
+                        return next[0] == 0x17;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                }
+            }
         }
 
         public static async Task<ProbeResult> ProbeAsync(int httpPort, string host, TimeSpan timeout, CancellationToken ct)

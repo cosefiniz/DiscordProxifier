@@ -706,7 +706,7 @@ namespace DiscordUnblocker
             List<TestItem> items = await proxy.TestAsync();
             testButton.Enabled = true;
             Func<TestItem, string> fmt = i => i.Reachable ? i.Result.Ms + " ms" : (i.Result.Status > 0 ? "HTTP " + i.Result.Status : "✕");
-            string detail = items.Count == 3 ? L.F("toast.test.detail", fmt(items[0]), fmt(items[1]), fmt(items[2])) : "";
+            string detail = string.Join(" · ", items.Select(i => L.T("test." + i.Name) + " " + fmt(i)));
             TestItem bad = items.FirstOrDefault(i => !i.Reachable);
             if (bad == null)
             {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -1001,9 +1002,12 @@ namespace DiscordUnblocker
                 new[] { "Media", "https://media.discordapp.net/embed/avatars/0.png" }
             };
             bool direct = backend is DirectBackend;
+            if (direct)
+                targets = targets.Concat(new[] { new[] { "Updater", "https://updates.discord.com/distributions/app/manifests/latest?channel=stable&platform=win&arch=x64" } }).ToArray();
             foreach (string[] t in targets)
             {
-                ProbeResult r = direct
+                bool viaTls12 = t[0] == "Updater";
+                ProbeResult r = direct && !viaTls12
                     ? await TlsProbe.ProbeAsync(httpPort, new Uri(t[1]).Host, TimeSpan.FromSeconds(20), CancellationToken.None)
                     : await ProbeAsync(httpPort, t[1], TimeSpan.FromSeconds(20), CancellationToken.None);
                 // Any HTTP answer proves the path works; unsigned media URLs return 401/404 by design.
