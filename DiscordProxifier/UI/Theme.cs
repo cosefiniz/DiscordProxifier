@@ -190,19 +190,37 @@ namespace DiscordUnblocker
 
         static void Tick()
         {
+            // A tween whose control was closed or disposed must not take the app down with it
+            // (it used to: a toast still sliding in when its window closed threw from the timer).
             foreach (var kv in active.ToList())
             {
                 Tween t = kv.Value;
                 float p = (float)Math.Min(1, t.Clock.Elapsed.TotalMilliseconds / t.Ms);
-                t.Apply(t.From + (t.To - t.From) * EaseOut(p));
-                if (p >= 1)
+                try
+                {
+                    t.Apply(t.From + (t.To - t.From) * EaseOut(p));
+                    if (p >= 1)
+                    {
+                        active.Remove(kv.Key);
+                        t.Done?.Invoke();
+                    }
+                }
+                catch (Exception)
                 {
                     active.Remove(kv.Key);
-                    t.Done?.Invoke();
                 }
             }
             foreach (Action a in tickers.ToList())
-                a();
+            {
+                try
+                {
+                    a();
+                }
+                catch (Exception)
+                {
+                    tickers.Remove(a);
+                }
+            }
             if (active.Count == 0 && tickers.Count == 0)
                 timer.Stop();
         }

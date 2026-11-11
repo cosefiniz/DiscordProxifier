@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -40,7 +40,11 @@ namespace DiscordUnblocker
                 return;
 
             bool startHidden = args.Any(a => a.Equals("--tray", StringComparison.OrdinalIgnoreCase));
-            Application.Run(new MainWindow(cfg, new Logger(), startHidden));
+            var logger = new Logger();
+            // An unexpected UI error is logged instead of showing the .NET crash dialog.
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (s, e) => logger.Log("Unexpected error: " + e.Exception, LogType.ERROR);
+            Application.Run(new MainWindow(cfg, logger, startHidden));
         }
 
         static bool EnsureSingleInstance()

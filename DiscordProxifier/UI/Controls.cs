@@ -550,7 +550,8 @@ namespace DiscordUnblocker
             Anim.Run(this, shown, 1, 320, v =>
             {
                 shown = v;
-                Top = (int)(HiddenY + (RestY - HiddenY) * v);
+                if (Parent != null && !IsDisposed) // the window may close mid-animation
+                    Top = (int)(HiddenY + (RestY - HiddenY) * v);
             });
             Invalidate();
             hideTimer.Stop();
@@ -563,9 +564,13 @@ namespace DiscordUnblocker
             Anim.Run(this, shown, 0, animate ? 260 : 0, v =>
             {
                 shown = v;
-                if (Parent != null)
+                if (Parent != null && !IsDisposed)
                     Top = (int)(HiddenY + (RestY - HiddenY) * v);
-            }, () => Visible = false);
+            }, () =>
+            {
+                if (!IsDisposed)
+                    Visible = false;
+            });
         }
 
         protected override void OnPaint(PaintEventArgs e)
