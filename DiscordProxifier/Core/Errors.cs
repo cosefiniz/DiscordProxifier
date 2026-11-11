@@ -59,6 +59,10 @@ namespace DiscordUnblocker
                     return new AppError(code, arg, ErrorAction.Retry, ErrorAction.SwitchMode);
                 case "DP-402":
                     return new AppError(code, arg, ErrorAction.Retry, ErrorAction.SwitchMode);
+                case "DP-601":
+                    return new AppError(code, arg, ErrorAction.SwitchMode, ErrorAction.Retry);
+                case "DP-602":
+                    return new AppError(code, arg, ErrorAction.SwitchMode, ErrorAction.Retry);
                 case "DP-501":
                     return new AppError(code, arg, ErrorAction.BrowseDiscord, ErrorAction.RescanDiscord);
                 case "DP-502":

@@ -19,31 +19,40 @@ namespace DiscordUnblocker
     public enum ProxyMode
     {
         Tor,
-        Warp
+        Warp,
+        Direct
     }
 
     public static class ProxyModes
     {
+        // Order of the route switch, fastest first.
+        public static readonly ProxyMode[] All = { ProxyMode.Direct, ProxyMode.Warp, ProxyMode.Tor };
+
+        public static int Index(ProxyMode m)
+        {
+            return Array.IndexOf(All, m);
+        }
+
         public static ProxyMode Parse(string s)
         {
-            return s != null && s.Trim().Equals("Warp", StringComparison.OrdinalIgnoreCase)
-                ? ProxyMode.Warp
-                : ProxyMode.Tor;
+            ProxyMode m;
+            return Enum.TryParse((s ?? "").Trim(), true, out m) ? m : ProxyMode.Tor;
         }
 
         public static string ToConfig(ProxyMode m)
         {
-            return m == ProxyMode.Warp ? "Warp" : "Tor";
+            return m.ToString();
         }
 
         public static string Display(ProxyMode m)
         {
-            return m == ProxyMode.Warp ? "WARP" : "Tor";
+            return m == ProxyMode.Warp ? "WARP" : m == ProxyMode.Direct ? L.T("mode.direct") : "Tor";
         }
 
-        public static ProxyMode Other(ProxyMode m)
+        // What to suggest when a route fails: the next one that works differently.
+        public static ProxyMode Next(ProxyMode m)
         {
-            return m == ProxyMode.Warp ? ProxyMode.Tor : ProxyMode.Warp;
+            return m == ProxyMode.Direct ? ProxyMode.Warp : m == ProxyMode.Warp ? ProxyMode.Tor : ProxyMode.Direct;
         }
     }
 
@@ -148,7 +157,7 @@ namespace DiscordUnblocker
 
         public abstract string Name { get; }
 
-        public bool IsAlive
+        public virtual bool IsAlive
         {
             get
             {
@@ -220,7 +229,7 @@ namespace DiscordUnblocker
             return p;
         }
 
-        public void Stop()
+        public virtual void Stop()
         {
             Process p = process;
             process = null;
@@ -713,9 +722,15 @@ namespace DiscordUnblocker
 
         static ProxyBackend Create(ProxyMode mode, Logger logger, string dataDir)
         {
-            return mode == ProxyMode.Warp
-                ? (ProxyBackend)new WarpBackend(logger, dataDir)
-                : new TorBackend(logger, dataDir);
+            switch (mode)
+            {
+                case ProxyMode.Warp:
+                    return new WarpBackend(logger, dataDir);
+                case ProxyMode.Direct:
+                    return new DirectBackend(logger, dataDir);
+                default:
+                    return new TorBackend(logger, dataDir);
+            }
         }
 
         CancellationToken ResetToken()
@@ -829,7 +844,11 @@ namespace DiscordUnblocker
                 await backend.StartAsync(socksPort, cfg, ct);
 
                 backend.Progress = L.T("progress.testing");
-                ProbeResult r = await ProbeAsync(httpPort, ProbeUrl, backend.ProbeTimeout, ct);
+                ProxyBackend b = backend;
+                Func<Task<ProbeResult>> probe = b is DirectBackend
+                    ? (Func<Task<ProbeResult>>)(() => TlsProbe.ProbeAsync(httpPort, "discord.com", b.ProbeTimeout, ct))
+                    : () => ProbeAsync(httpPort, ProbeUrl, b.ProbeTimeout, ct);
+                ProbeResult r = await probe();
                 var warp = backend as WarpBackend;
                 if (!r.Ok && warp != null && warp.FreshAccount)
                 {
@@ -839,14 +858,14 @@ namespace DiscordUnblocker
                     while (!r.Ok && sw.Elapsed < TimeSpan.FromSeconds(75))
                     {
                         await Task.Delay(5000, ct);
-                        r = await ProbeAsync(httpPort, ProbeUrl, backend.ProbeTimeout, ct);
+                        r = await probe();
                     }
                 }
                 else if (!r.Ok)
                 {
                     // WireGuard may need a moment for the first handshake.
                     await Task.Delay(1000, ct);
-                    r = await ProbeAsync(httpPort, ProbeUrl, backend.ProbeTimeout, ct);
+                    r = await probe();
                 }
                 logger.Log($"{backend.Name} probe: {r.Detail}", r.Ok ? LogType.NORMAL : LogType.ERROR);
                 if (!r.Ok)
@@ -869,6 +888,9 @@ namespace DiscordUnblocker
         {
             if (r.Status == 403 || r.Status == 429)
                 return new ProxyFailure("DP-402", "HTTP " + r.Status, r.Detail);
+            var direct = b as DirectBackend;
+            if (direct != null)
+                return new ProxyFailure(direct.DnsFailed ? "DP-602" : "DP-601", null, r.Detail);
             var warp = b as WarpBackend;
             if (warp != null)
                 return new ProxyFailure(warp.HandshakeSeen ? "DP-302" : "DP-303", null, r.Detail);
@@ -978,9 +1000,12 @@ namespace DiscordUnblocker
                 new[] { "CDN", "https://cdn.discordapp.com/embed/avatars/0.png" },
                 new[] { "Media", "https://media.discordapp.net/embed/avatars/0.png" }
             };
+            bool direct = backend is DirectBackend;
             foreach (string[] t in targets)
             {
-                ProbeResult r = await ProbeAsync(httpPort, t[1], TimeSpan.FromSeconds(20), CancellationToken.None);
+                ProbeResult r = direct
+                    ? await TlsProbe.ProbeAsync(httpPort, new Uri(t[1]).Host, TimeSpan.FromSeconds(20), CancellationToken.None)
+                    : await ProbeAsync(httpPort, t[1], TimeSpan.FromSeconds(20), CancellationToken.None);
                 // Any HTTP answer proves the path works; unsigned media URLs return 401/404 by design.
                 // 403 (blocked exit), 429 (rate limited) and 5xx point at a real problem.
                 bool reachable = r.Status > 0 && r.Status != 403 && r.Status != 429 && r.Status < 500;

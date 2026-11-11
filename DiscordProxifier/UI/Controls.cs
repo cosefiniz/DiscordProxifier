@@ -178,8 +178,8 @@ namespace DiscordUnblocker
         public string[] Glyphs = { null, null };
         public bool Busy; // dims the control and ignores clicks
         int index;
-        float pos; // 0 = left, 1 = right
-        float hover = -1;
+        float pos; // segment index, animated (0 = leftmost)
+        int hover = -1;
 
         public event Action<int> UserChanged;
 
@@ -190,6 +190,14 @@ namespace DiscordUnblocker
         }
 
         public int Index => index;
+        int Count => Math.Max(1, Labels.Length);
+        float Pad => Theme.S(3);
+        float Cell => (Width - Pad * 2) / Count;
+
+        int CellAt(int x)
+        {
+            return Math.Max(0, Math.Min(Count - 1, (int)((x - Pad) / Cell)));
+        }
 
         public void SetIndex(int i, bool animate)
         {
@@ -200,7 +208,7 @@ namespace DiscordUnblocker
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            float h = e.X < Width / 2 ? 0 : 1;
+            int h = CellAt(e.X);
             if (h != hover)
             {
                 hover = h;
@@ -220,7 +228,7 @@ namespace DiscordUnblocker
             base.OnMouseClick(e);
             if (Busy)
                 return;
-            int i = e.X < Width / 2 ? 0 : 1;
+            int i = CellAt(e.X);
             if (i == index)
                 return;
             SetIndex(i, true);
@@ -240,9 +248,8 @@ namespace DiscordUnblocker
                 g.FillPath(b, p);
                 g.DrawPath(pen, p);
             }
-            float pad = Theme.S(3);
-            float half = (Width - pad * 2) / 2f;
-            var thumb = new RectangleF(pad + pos * half, pad, half, Height - pad * 2 - 1);
+            float pad = Pad, cell = Cell;
+            var thumb = new RectangleF(pad + pos * cell, pad, cell, Height - pad * 2 - 1);
             using (GraphicsPath p = Theme.Round(thumb, Theme.S(7)))
             using (var b = new SolidBrush(Busy ? Theme.Control : Theme.ControlHover))
             using (var pen = new Pen(Theme.BorderStrong))
@@ -250,20 +257,20 @@ namespace DiscordUnblocker
                 g.FillPath(b, p);
                 g.DrawPath(pen, p);
             }
-            for (int i = 0; i < 2; i++)
+            for (int i = 0; i < Count; i++)
             {
-                float on = 1 - Math.Abs(pos - i);
+                float on = Math.Max(0, 1 - Math.Abs(pos - i));
                 Color c = Theme.Blend(hover == i ? Theme.Text : Theme.TextMuted, Theme.Text, on);
                 if (Busy)
                     c = Theme.Blend(c, Theme.TextFaint, 0.5f);
-                var cell = new Rectangle((int)(pad + i * half), 0, (int)half, Height);
+                var r = new Rectangle((int)(pad + i * cell), 0, (int)cell, Height);
                 string label = Labels[i];
-                string glyph = Glyphs[i];
+                string glyph = Glyphs != null && i < Glyphs.Length ? Glyphs[i] : null;
                 Font icon = Theme.Icons(Font.SizeInPoints);
                 int gw = glyph != null ? TextRenderer.MeasureText(g, glyph, icon, Size.Empty, TextFormatFlags.NoPadding).Width : 0;
                 int tw = TextRenderer.MeasureText(g, label, Theme.Strong, Size.Empty, TextFormatFlags.NoPadding).Width;
-                int gap = glyph != null ? Theme.S(7) : 0;
-                int x = cell.X + (cell.Width - gw - gap - tw) / 2;
+                int gap = glyph != null ? Theme.S(6) : 0;
+                int x = r.X + (r.Width - gw - gap - tw) / 2;
                 if (glyph != null)
                     Theme.DrawText(g, glyph, icon, new Rectangle(x, 0, gw + 2, Height), c, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 Theme.DrawText(g, label, Theme.Strong, new Rectangle(x + gw + gap, 0, tw + 4, Height), c, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);

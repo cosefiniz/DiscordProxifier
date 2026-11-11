@@ -59,6 +59,9 @@ namespace DiscordUnblocker
             ["progress.warp.profile"] = new[] { "Creating WARP profile", "WARP profili oluşturuluyor" },
             ["progress.warp.connect"] = new[] { "Connecting to WARP", "WARP'a bağlanılıyor" },
             ["progress.warp.activating"] = new[] { "Waiting for the new WARP account to activate", "Yeni WARP hesabının etkinleşmesi bekleniyor" },
+            ["progress.direct"] = new[] { "Starting direct connection", "Doğrudan bağlantı başlatılıyor" },
+            ["mode.direct"] = new[] { "Direct", "Doğrudan" },
+            ["route.direct.hint"] = new[] { "Fastest; no relay, works if your ISP only filters by name", "En hızlısı; aracı yok, sağlayıcı yalnızca ada göre engelliyorsa çalışır" },
             ["progress.testing"] = new[] { "Checking Discord access", "Discord erişimi kontrol ediliyor" },
 
             // Route switch
@@ -210,6 +213,10 @@ namespace DiscordUnblocker
             ["DP-401.d"] = new[] { "The proxy is running but Discord didn't answer ({0}).", "Proxy çalışıyor ama Discord yanıt vermedi ({0})." },
             ["DP-402.t"] = new[] { "Discord refused this route", "Discord bu çıkışı reddetti" },
             ["DP-402.d"] = new[] { "Discord answered {0}: the current exit is blocked or rate-limited. Reconnecting picks a new one.", "Discord {0} yanıtı verdi: mevcut çıkış noktası engellenmiş ya da sınırlanmış. Yeniden bağlanmak yeni bir çıkış seçer." },
+            ["DP-601.t"] = new[] { "Direct route is blocked", "Doğrudan yol engelli" },
+            ["DP-601.d"] = new[] { "Your provider stopped the connection even with the split trick. It may block by address or detect the trick; WARP or Tor still work.", "Sağlayıcınız bölme hilesine rağmen bağlantıyı kesti. Adres bazlı engelliyor ya da hileyi tanıyor olabilir; WARP veya Tor yine çalışır." },
+            ["DP-602.t"] = new[] { "Secure DNS isn't reachable", "Şifreli DNS'e ulaşılamıyor" },
+            ["DP-602.d"] = new[] { "The direct route needs DNS over HTTPS (Cloudflare or Google) because the provider's DNS gives fake answers for Discord. None of them answered.", "Doğrudan yol, sağlayıcının DNS'i Discord için sahte cevap verdiğinden şifreli DNS (Cloudflare veya Google) kullanır. Hiçbiri yanıt vermedi." },
             ["DP-501.t"] = new[] { "Discord wasn't found", "Discord bulunamadı" },
             ["DP-501.d"] = new[] { "No Discord installation was found. Install Discord, or choose its folder if it's in a custom location.", "Discord kurulumu bulunamadı. Discord'u kurun ya da farklı bir yerdeyse klasörünü seçin." },
             ["DP-502.t"] = new[] { "Proxy module unavailable", "Proxy modülü alınamadı" },

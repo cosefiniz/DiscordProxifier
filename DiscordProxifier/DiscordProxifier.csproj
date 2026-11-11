@@ -191,6 +191,7 @@
   <ItemGroup>
     <Compile Include="Core\AppSetup.cs" />
     <Compile Include="Core\Configuration.cs" />
+    <Compile Include="Core\DirectBackend.cs" />
     <Compile Include="Core\DiscordClients.cs" />
     <Compile Include="Core\Errors.cs" />
     <Compile Include="Core\Logger.cs" />

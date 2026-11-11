@@ -77,6 +77,7 @@ namespace DiscordUnblocker
             public const string Info = "";
             public const string Copy = "";
             public const string Folder = "";
+            public const string Bolt = "";
             public const string Link = "";
             public const string ChevronDown = "";
         }

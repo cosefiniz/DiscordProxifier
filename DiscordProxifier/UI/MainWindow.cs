@@ -89,9 +89,13 @@ namespace DiscordUnblocker
 
             // Route switch
             routeLabel = new TextLine { Font = Theme.Small, ForeColor = Theme.TextMuted, Height = Theme.S(18) };
-            route = new SegmentSwitch { Glyphs = new[] { Theme.Glyph.Globe, Theme.Glyph.Cloud }, Labels = new[] { "Tor", "WARP" } };
-            route.SetIndex(mode == ProxyMode.Warp ? 1 : 0, false);
-            route.UserChanged += async i => await ModeChosen(i == 1 ? ProxyMode.Warp : ProxyMode.Tor);
+            route = new SegmentSwitch
+            {
+                Glyphs = new[] { Theme.Glyph.Bolt, Theme.Glyph.Cloud, Theme.Glyph.Globe },
+                Labels = ProxyModes.All.Select(ProxyModes.Display).ToArray()
+            };
+            route.SetIndex(ProxyModes.Index(mode), false);
+            route.UserChanged += async i => await ModeChosen(ProxyModes.All[i]);
             routeHint = new TextLine { Font = Theme.Small, ForeColor = Theme.TextFaint, Height = Theme.S(18) };
             autoConnect = new ToggleSwitch { Checked = cfg.AutoConnect };
             autoConnect.CheckedChanged += (s, e) =>
@@ -124,7 +128,7 @@ namespace DiscordUnblocker
             // Error card
             errorCard = new ErrorCard();
             errorCard.ActionLabel = a => a == ErrorAction.SwitchMode
-                ? L.F("action.SwitchMode", ProxyModes.Display(ProxyModes.Other(mode)))
+                ? L.F("action.SwitchMode", ProxyModes.Display(ProxyModes.Next(mode)))
                 : L.T("action." + a);
             errorCard.HeightChanging += DoLayout;
             errorCard.ActionClicked += async a => await RunAction(a);
@@ -154,8 +158,8 @@ namespace DiscordUnblocker
             traySwitch = new ToolStripMenuItem();
             traySwitch.Click += async (s, e) =>
             {
-                ProxyMode target = ProxyModes.Other(mode);
-                route.SetIndex(target == ProxyMode.Warp ? 1 : 0, true);
+                ProxyMode target = ProxyModes.Next(mode);
+                route.SetIndex(ProxyModes.Index(target), true);
                 await ModeChosen(target);
             };
             trayLaunch = new ToolStripMenuItem();
@@ -336,6 +340,8 @@ namespace DiscordUnblocker
         void ApplyTexts()
         {
             routeLabel.Text = L.T("route.label");
+            route.Labels = ProxyModes.All.Select(ProxyModes.Display).ToArray();
+            route.Invalidate();
             autoConnect.Text = L.T("autoconnect");
             discordLabel.Text = L.T("client.label");
             changeButton.Text = L.T("client.change");
@@ -486,7 +492,7 @@ namespace DiscordUnblocker
             statusTitle.Text = title;
             statusSub.Text = sub;
             route.Busy = proxy.IsStarting;
-            routeHint.Text = L.T(mode == ProxyMode.Warp ? "route.warp.hint" : "route.tor.hint");
+            routeHint.Text = L.T(mode == ProxyMode.Warp ? "route.warp.hint" : mode == ProxyMode.Direct ? "route.direct.hint" : "route.tor.hint");
             int want = Math.Max(Theme.S(104), connectButton.PreferredWidth());
             if (connectButton.Width != want)
                 DoLayout();
@@ -494,7 +500,7 @@ namespace DiscordUnblocker
 
             trayStatus.Text = title + " · " + modeName;
             trayConnect.Text = connectButton.Text;
-            traySwitch.Text = L.F("tray.switch", ProxyModes.Display(ProxyModes.Other(mode)));
+            traySwitch.Text = L.F("tray.switch", ProxyModes.Display(ProxyModes.Next(mode)));
             traySwitch.Enabled = !proxy.IsStarting;
             string tip = "Discord Proxifier · " + title;
             tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
@@ -541,7 +547,7 @@ namespace DiscordUnblocker
             mode = m;
             cfg.Mode = ProxyModes.ToConfig(m);
             cfg.Save();
-            route.SetIndex(m == ProxyMode.Warp ? 1 : 0, animate);
+            route.SetIndex(ProxyModes.Index(m), animate);
         }
 
         async Task ConnectButtonClicked()
@@ -581,7 +587,7 @@ namespace DiscordUnblocker
                 return;
             if (target == ProxyMode.Warp && !EnsureWarpConsent())
             {
-                route.SetIndex(0, true);
+                route.SetIndex(ProxyModes.Index(mode), true);
                 Notify(Toast.Kind.Warning, L.T("warp.consent.declined"), null);
                 return;
             }
@@ -625,7 +631,7 @@ namespace DiscordUnblocker
                     await Connect();
                     break;
                 case ErrorAction.SwitchMode:
-                    ProxyMode target = ProxyModes.Other(mode);
+                    ProxyMode target = ProxyModes.Next(mode);
                     if (target == ProxyMode.Warp && !EnsureWarpConsent())
                         return;
                     SetMode(target, true);
