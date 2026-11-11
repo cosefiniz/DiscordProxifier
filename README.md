@@ -91,7 +91,7 @@ Antivirüsünüzü kapatmayın; yalnızca bu klasörü dışlamak yeterli. Uygul
 
 ## Updates
 
-The app reads [`dist/manifest.json`](dist/manifest.json) from this repo and installs files only when their SHA256 matches. version.dll updates automatically; Tor updates from **Settings → Update Tor**; a new app version shows a card with **Install now**, which downloads the exe from the GitHub release, checks it, swaps it in and restarts (Discord stays open).
+The app reads [`dist/manifest.json`](dist/manifest.json) from this repo and installs files only when their SHA256 matches. version.dll updates automatically; Tor updates from **Settings → Update Tor**; a new app version shows a card with **Install now**, which downloads the exe from the GitHub release, checks it, swaps it in and restarts (Discord stays open). It checks at startup, every 6 hours while running, and when opened from the tray if the last check is over an hour old.
 
 If something doesn't work: **Settings → Troubleshooting → Repair** checks the files, Discord and the connection and fixes what it can; **Create report** saves a text file to the desktop that shows what your provider blocks. Send that file when asking for help (personal paths and keys are not included).
 
