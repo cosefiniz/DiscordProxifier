@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -56,6 +57,7 @@ namespace DiscordUnblocker
             cts = new CancellationTokenSource();
             listener = new TcpListener(IPAddress.Loopback, socksPort);
             listener.Start(256);
+            NoInherit(listener.Server);
             logger.Log($"Direct: listening on 127.0.0.1:{socksPort} (DoH + TLS record split)");
             CancellationToken token = cts.Token;
             Task.Run(() => AcceptLoop(token));
@@ -64,6 +66,20 @@ namespace DiscordUnblocker
             helperPort = FreePortNear(socksPort, int.Parse(cfg.GostPort));
             Task.Run(() => StartHelperAsync(cfg, token));
             return Task.FromResult(true);
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool SetHandleInformation(IntPtr hObject, uint dwMask, uint dwFlags);
+
+        // .NET Framework sockets are inheritable, and child processes (the WARP/Tor helper,
+        // anything started with UseShellExecute=false) would keep a copy that holds the port.
+        static void NoInherit(Socket s)
+        {
+            try
+            {
+                SetHandleInformation(s.Handle, 1 /* HANDLE_FLAG_INHERIT */, 0);
+            }
+            catch { }
         }
 
         static int FreePortNear(int socksPort, int gostPort)
@@ -226,6 +242,7 @@ namespace DiscordUnblocker
             try
             {
                 client.NoDelay = true;
+                NoInherit(client.Client);
                 NetworkStream local = client.GetStream();
 
                 // SOCKS5 greeting: no authentication.
@@ -276,6 +293,7 @@ namespace DiscordUnblocker
                         }
                         Report("helper:" + target, $"{target}: TLS 1.2 client, sent through {helper?.Name}", LogType.NORMAL);
                         remote = new TcpClient { NoDelay = true };
+                        NoInherit(remote.Client);
                         open[remote] = 0;
                         up = await SocksConnect(remote, helperPort, target, port);
                         if (up == null)
@@ -344,6 +362,7 @@ namespace DiscordUnblocker
             }
             Report("route:" + (host ?? targets[0].ToString()), $"{host ?? "(address)"}:{port} -> {targets[0]}", LogType.NORMAL);
             var remote = new TcpClient(targets[0].AddressFamily) { NoDelay = true };
+            NoInherit(remote.Client);
             Task connect = remote.ConnectAsync(targets, port);
             if (await Task.WhenAny(connect, Task.Delay(8000, ct)) != connect || connect.IsFaulted)
             {

@@ -426,13 +426,16 @@ namespace DiscordUnblocker
             logger.Log($"Starting {c.DisplayName}: {Path.GetFileName(c.LauncherPath)} {args}");
             try
             {
+                // ShellExecute: Discord must not inherit this app's handles. With CreateProcess
+                // inheritance it kept a copy of the Direct route's listening socket, so the port
+                // stayed bound after switching routes (DP-101).
                 Process.Start(
                     new ProcessStartInfo(c.LauncherPath, args)
                     {
                         WorkingDirectory = c.LatestAppDir ?? c.RootDir,
-                        UseShellExecute = false
+                        UseShellExecute = true
                     }
-                ).Dispose();
+                )?.Dispose();
                 return true;
             }
             catch (Exception ex)
