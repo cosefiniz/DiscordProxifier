@@ -19,7 +19,7 @@ namespace DiscordUnblocker.Glass
     // window); AppController.OpenSettings applies autostart, ports and reconnects afterwards.
     public class GlassSettingsWindow : GlassWindow
     {
-        const double SidebarWidth = 204, ItemHeight = 34, ItemGap = 2;
+        const double SidebarWidth = 188, ItemHeight = 30, ItemGap = 2;
 
         static readonly string[] Ids = { "general", "appearance", "connection", "updates", "trouble" };
         static readonly string[] Keys = { "settings.general", "look.appearance", "settings.connection", "settings.updates", "settings.trouble" };
@@ -57,7 +57,7 @@ namespace DiscordUnblocker.Glass
         readonly List<ToneTile> tones = new List<ToneTile>();
         bool shortcutMade;
 
-        public GlassSettingsWindow(AppController app, string focus) : base(760, false, L.T("settings.title"))
+        public GlassSettingsWindow(AppController app, string focus) : base(680, false, L.T("settings.title"))
         {
             this.app = app;
             cfg = app.Config;
@@ -65,7 +65,7 @@ namespace DiscordUnblocker.Glass
             CloseOnEscape = true;
             ShowInTaskbar = false;
             SizeToContent = SizeToContent.Manual;
-            Height = Math.Min(624 + ShadowMargin * 2, SystemParameters.WorkArea.Height);
+            Height = Math.Min(540 + ShadowMargin * 2, SystemParameters.WorkArea.Height);
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
             var root = new Grid { Margin = new Thickness(14, 0, 14, 14) };
@@ -79,7 +79,7 @@ namespace DiscordUnblocker.Glass
             who.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             who.ColumnDefinitions.Add(new ColumnDefinition());
             if (LogoImage != null)
-                who.Children.Add(new Image { Source = LogoImage, Width = 34, Height = 34, Margin = new Thickness(0, 0, 10, 0) });
+                who.Children.Add(new Image { Source = LogoImage, Width = 28, Height = 28, Margin = new Thickness(0, 0, 9, 0) });
             var whoText = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             whoText.Children.Add(G.Text("Discord Proxifier", TextStyle.Headline));
             versionLine = G.Text("", TextStyle.Footnote, GlassTheme.Secondary);

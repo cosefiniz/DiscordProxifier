@@ -79,40 +79,43 @@ namespace DiscordUnblocker.Glass
             }
         }
 
-        public GlassMainWindow(AppController app, bool startHidden) : base(392, true)
+        public GlassMainWindow(AppController app, bool startHidden) : base(340, true)
         {
             this.app = app;
             cfg = app.Config;
 
             // ---- title row: logo, name, version; to tray, minimize, close ----
             versionText = G.Text("v" + AppSetup.AppVersion, TextStyle.Caption, GlassTheme.Tertiary);
-            versionText.Margin = new Thickness(8, 3, 0, 0);
+            versionText.Margin = new Thickness(7, 2, 0, 0);
             TitleLeft.Children.Add(versionText);
             minButton = AddTitleButton(Glyph.Minimize, null, () => WindowState = WindowState.Minimized);
             trayButton = AddTitleButton(Glyph.ToTray, null, () => app.HideToTray());
 
-            var content = new StackPanel { Margin = new Thickness(16, 2, 16, 16) };
+            var content = new StackPanel { Margin = new Thickness(12, 0, 12, 12) };
 
             // ---- status pane ----
-            var statusStack = new StackPanel { Margin = new Thickness(20, 18, 20, 20) };
+            // macOS layout: status on the left, the action as a regular push button on the right.
+            var statusStack = new StackPanel { Margin = new Thickness(16, 14, 14, 14) };
             var head = new Grid();
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             head.ColumnDefinitions.Add(new ColumnDefinition());
-            light = new StatusLight(11) { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 3, 12, 0) };
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            light = new StatusLight(9) { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(1, 2, 10, 0) };
             head.Children.Add(light);
             statusTitle = new CrossfadeText(TextStyle.LargeTitle, GlassTheme.Text, false);
             Grid.SetColumn(statusTitle, 1);
             head.Children.Add(statusTitle);
             statusStack.Children.Add(head);
-            statusSub = new CrossfadeText(TextStyle.Subhead, GlassTheme.Secondary, true) { Margin = new Thickness(25, 3, 0, 0) };
+            connect = new GlassButton("", ButtonKind.Primary, null, 34) { MinWidth = 84, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+            connect.Click += async () => await app.ConnectButtonClicked();
+            Grid.SetColumn(connect, 2);
+            head.Children.Add(connect);
+            statusSub = new CrossfadeText(TextStyle.Subhead, GlassTheme.Secondary, true) { Margin = new Thickness(20, 2, 0, 0) };
             statusStack.Children.Add(statusSub);
             progress = new GlassProgress();
             // The slot keeps its height, so the pane doesn't jump when progress appears.
-            statusStack.Children.Add(new Border { Height = 4, Margin = new Thickness(0, 16, 0, 0), Child = progress });
-            connect = new GlassButton("", ButtonKind.Primary, null, 40) { Margin = new Thickness(0, 16, 0, 0) };
-            connect.Click += async () => await app.ConnectButtonClicked();
-            statusStack.Children.Add(connect);
-            content.Children.Add(new GlassPane(26) { Child = statusStack });
+            statusStack.Children.Add(new Border { Height = 4, Margin = new Thickness(0, 12, 0, 0), Child = progress });
+            content.Children.Add(new GlassPane(24) { Child = statusStack });
 
             // ---- error / update card ----
             card = new GlassCard { ActionLabel = app.ActionLabel };
@@ -130,7 +133,7 @@ namespace DiscordUnblocker.Glass
             routeHint = G.Note("");
             content.Children.Add(routeHint);
 
-            var options = new InsetGroup { Margin = new Thickness(0, 14, 0, 0) };
+            var options = new InsetGroup { Margin = new Thickness(0, 10, 0, 0) };
             autoRoute = new LiquidToggle(cfg.AutoRoute);
             autoRoute.Toggled += on =>
             {
@@ -159,8 +162,8 @@ namespace DiscordUnblocker.Glass
                 BuildClientMenu().Open(pickButton);
             };
             clientInfo.Children.Add(pickButton);
-            var stateRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
-            clientLight = new StatusLight(7) { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(1, 1, 8, 0) };
+            var stateRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+            clientLight = new StatusLight(6) { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(1, 1, 7, 0) };
             clientStateText = G.Text("", TextStyle.Footnote, GlassTheme.Secondary);
             stateRow.Children.Add(clientLight);
             stateRow.Children.Add(clientStateText);
@@ -187,11 +190,11 @@ namespace DiscordUnblocker.Glass
             tools.Children.Add(testButton);
             tools.Children.Add(logsButton);
             tools.Children.Add(settingsButton);
-            content.Children.Add(new GlassPane(20) { Child = tools, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 20, 0, 0) });
+            content.Children.Add(new GlassPane(28) { Child = tools, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14, 0, 0) });
 
             // ---- notes: a layer over everything, lifted over the title row ----
-            overlay = new Grid { RenderTransform = new TranslateTransform(0, -48) };
-            toast = new GlassToast { Margin = new Thickness(16, 9, 16, 0) };
+            overlay = new Grid { RenderTransform = new TranslateTransform(0, -40) };
+            toast = new GlassToast { Margin = new Thickness(12, 6, 12, 0) };
             overlay.Children.Add(toast);
             var root = new Grid();
             root.Children.Add(content);

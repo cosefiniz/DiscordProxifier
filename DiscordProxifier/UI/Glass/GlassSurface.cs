@@ -291,8 +291,10 @@ namespace DiscordUnblocker.Glass
         public double BlurRadius { get; set; } = 18;
         public double Refraction { get; set; } = 9;
 
+        // Radii are given in the old, roomier scale and drawn compact: 26 -> 16, 20 -> 12, 16 -> 10.
         public GlassPane(double cornerRadius = 22)
         {
+            cornerRadius = Math.Max(6, Math.Round(cornerRadius * 0.6));
             radius = cornerRadius;
             brush = new VisualBrush { ViewboxUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
             blurred = new Rectangle { Fill = brush };
@@ -300,7 +302,7 @@ namespace DiscordUnblocker.Glass
             fx = RefractionEffect.Available ? new RefractionEffect() : null;
             fxHost = new Border { Child = clip, Effect = fx, IsHitTestVisible = false };
             tintLayer = new Border { Background = GlassTheme.Glass, IsHitTestVisible = false };
-            sheenLayer = new Border { Background = GlassTheme.Sheen, Height = 30, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(1, 1, 1, 0), IsHitTestVisible = false };
+            sheenLayer = new Border { Background = GlassTheme.Sheen, Height = 20, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(1, 1, 1, 0), IsHitTestVisible = false };
             rimLayer = new Border { BorderBrush = GlassTheme.Rim, BorderThickness = new Thickness(1), IsHitTestVisible = false };
             Children.Add(fxHost);
             Children.Add(tintLayer);

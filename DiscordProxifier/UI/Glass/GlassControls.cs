@@ -51,14 +51,14 @@ namespace DiscordUnblocker.Glass
         {
             switch (style)
             {
-                case TextStyle.LargeTitle: Set(t, 26, FontWeights.SemiBold, true); break;
-                case TextStyle.Title: Set(t, 20, FontWeights.SemiBold, true); break;
-                case TextStyle.Headline: Set(t, 14, FontWeights.SemiBold, false); break;
-                case TextStyle.Body: Set(t, 13.5, FontWeights.Normal, false); break;
-                case TextStyle.Callout: Set(t, 13, FontWeights.Normal, false); break;
-                case TextStyle.Subhead: Set(t, 12.5, FontWeights.Normal, false); break;
-                case TextStyle.Footnote: Set(t, 11.5, FontWeights.Normal, false); break;
-                default: Set(t, 11, FontWeights.Normal, false); break;
+                case TextStyle.LargeTitle: Set(t, 22, FontWeights.SemiBold, true); break;
+                case TextStyle.Title: Set(t, 17, FontWeights.SemiBold, true); break;
+                case TextStyle.Headline: Set(t, 13, FontWeights.SemiBold, false); break;
+                case TextStyle.Body: Set(t, 13, FontWeights.Normal, false); break;
+                case TextStyle.Callout: Set(t, 12.5, FontWeights.Normal, false); break;
+                case TextStyle.Subhead: Set(t, 12, FontWeights.Normal, false); break;
+                case TextStyle.Footnote: Set(t, 11, FontWeights.Normal, false); break;
+                default: Set(t, 10.5, FontWeights.Normal, false); break;
             }
         }
 
@@ -87,7 +87,7 @@ namespace DiscordUnblocker.Glass
         {
             var t = Text(s, TextStyle.Footnote, GlassTheme.Secondary);
             t.FontWeight = FontWeights.SemiBold;
-            t.Margin = new Thickness(14, 18, 0, 7);
+            t.Margin = new Thickness(12, 14, 0, 5);
             return t;
         }
 
@@ -97,7 +97,7 @@ namespace DiscordUnblocker.Glass
             var t = Text(s, TextStyle.Footnote, GlassTheme.Tertiary);
             t.TextWrapping = TextWrapping.Wrap;
             t.TextTrimming = TextTrimming.None;
-            t.Margin = new Thickness(14, 7, 14, 0);
+            t.Margin = new Thickness(12, 5, 12, 0);
             return t;
         }
 
@@ -149,18 +149,26 @@ namespace DiscordUnblocker.Glass
         bool down;
         public event Action Click;
 
+        // Heights are given in the old, roomier scale and drawn compact (macOS sizes): 40 -> 32, 32 -> 26, 28 -> 22.
+        public static double Compact(double h)
+        {
+            return Math.Max(20, Math.Round(h * 0.8));
+        }
+
         public GlassButton(string text, ButtonKind kind = ButtonKind.Secondary, string glyph = null, double height = 34)
         {
+            height = Compact(height);
             Height = height;
+            double radius = kind == ButtonKind.Icon ? height / 2 : Math.Min(height / 2, 7);
             Cursor = Cursors.Hand;
             Focusable = true;
             RenderTransformOrigin = new Point(0.5, 0.5);
             RenderTransform = scale;
-            fill = new Border { CornerRadius = new CornerRadius(height / 2), BorderThickness = new Thickness(1) };
-            hover = new Border { CornerRadius = new CornerRadius(height / 2), Background = GlassTheme.Hover, Opacity = 0 };
-            label = G.Text(text, height >= 34 ? TextStyle.Headline : TextStyle.Callout);
-            label.FontWeight = FontWeights.SemiBold;
-            icon = G.Icon(glyph ?? "", height >= 34 ? 13 : 12);
+            fill = new Border { CornerRadius = new CornerRadius(radius), BorderThickness = new Thickness(1) };
+            hover = new Border { CornerRadius = new CornerRadius(radius), Background = GlassTheme.Hover, Opacity = 0 };
+            label = G.Text(text, height >= 30 ? TextStyle.Body : TextStyle.Callout);
+            label.FontWeight = FontWeights.Medium;
+            icon = G.Icon(glyph ?? "", height >= 30 ? 12 : 11);
             icon.Visibility = glyph == null ? Visibility.Collapsed : Visibility.Visible;
             content = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             content.Children.Add(icon);
@@ -218,7 +226,7 @@ namespace DiscordUnblocker.Glass
                 G.SetText(label, value);
                 label.Visibility = string.IsNullOrEmpty(value) ? Visibility.Collapsed : Visibility.Visible;
                 icon.Margin = new Thickness(0, 0, string.IsNullOrEmpty(value) ? 0 : 7, 0);
-                double pad = Height >= 34 ? 20 : 15;
+                double pad = Height >= 30 ? 16 : 12;
                 content.Margin = kind == ButtonKind.Icon || string.IsNullOrEmpty(value) ? new Thickness(0) : new Thickness(pad, 0, pad, 0);
             }
         }
@@ -246,7 +254,7 @@ namespace DiscordUnblocker.Glass
                         fill.BorderBrush = new SolidColorBrush(Color.FromArgb(70, 255, 255, 255));
                         label.Foreground = GlassTheme.OnAccent;
                         icon.Foreground = GlassTheme.OnAccent;
-                        Effect = new DropShadowEffect { Color = GlassTheme.P.AccentGlow, BlurRadius = 16, ShadowDepth = 2, Opacity = GlassTheme.P.IsLight ? 0.35 : 0.5 };
+                        Effect = new DropShadowEffect { Color = GlassTheme.P.AccentGlow, BlurRadius = 4, ShadowDepth = 1, Direction = 270, Opacity = GlassTheme.P.IsLight ? 0.25 : 0.35 };
                         break;
                     case ButtonKind.Plain:
                         fill.Background = Brushes.Transparent;
@@ -284,6 +292,7 @@ namespace DiscordUnblocker.Glass
 
         public LiquidSegments(string[] items, string[] glyphs = null, double height = 40)
         {
+            height = Math.Max(22, Math.Round(height * 0.75)); // 40 -> 30, 32 -> 24
             Height = height;
             var track = new Border
             {
@@ -313,11 +322,11 @@ namespace DiscordUnblocker.Glass
                 lane.ColumnDefinitions.Add(new ColumnDefinition());
                 int k = i;
                 var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-                var ic = G.Icon(glyphs != null && i < glyphs.Length ? glyphs[i] : "", 12, GlassTheme.Secondary);
-                ic.Margin = new Thickness(0, 1, 7, 0);
+                var ic = G.Icon(glyphs != null && i < glyphs.Length ? glyphs[i] : "", 11, GlassTheme.Secondary);
+                ic.Margin = new Thickness(0, 1, 6, 0);
                 ic.Visibility = glyphs == null ? Visibility.Collapsed : Visibility.Visible;
                 var t = G.Text(items[i], TextStyle.Callout, GlassTheme.Secondary);
-                t.FontWeight = FontWeights.SemiBold;
+                t.FontWeight = FontWeights.Medium;
                 row.Children.Add(ic);
                 row.Children.Add(t);
                 icons.Add(ic);
@@ -425,22 +434,22 @@ namespace DiscordUnblocker.Glass
         public LiquidToggle(bool isOn)
         {
             on = isOn;
-            Width = 44;
-            Height = 26;
+            Width = 34;
+            Height = 20;
             Cursor = Cursors.Hand;
             Background = Brushes.Transparent;
-            track = new Border { CornerRadius = new CornerRadius(13), Background = GlassTheme.ToggleOff };
-            onFill = new Border { CornerRadius = new CornerRadius(13), Background = GlassTheme.Accent, Opacity = on ? 1 : 0 };
+            track = new Border { CornerRadius = new CornerRadius(10), Background = GlassTheme.ToggleOff };
+            onFill = new Border { CornerRadius = new CornerRadius(10), Background = GlassTheme.Accent, Opacity = on ? 1 : 0 };
             knob = new Border
             {
-                Width = 22,
-                Height = 22,
-                CornerRadius = new CornerRadius(11),
+                Width = 16,
+                Height = 16,
+                CornerRadius = new CornerRadius(8),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Margin = new Thickness(2, 0, 0, 0),
                 Background = GlassTheme.Knob,
                 RenderTransformOrigin = new Point(0.5, 0.5),
-                Effect = new DropShadowEffect { BlurRadius = 5, ShadowDepth = 1, Opacity = 0.3, Color = Colors.Black },
+                Effect = new DropShadowEffect { BlurRadius = 3, ShadowDepth = 1, Direction = 270, Opacity = 0.3, Color = Colors.Black },
             };
             var tg = new TransformGroup();
             tg.Children.Add(stretch);
@@ -451,7 +460,7 @@ namespace DiscordUnblocker.Glass
             g.Children.Add(onFill);
             g.Children.Add(knob);
             Child = g;
-            move.X = on ? 18 : 0;
+            move.X = on ? 14 : 0;
             MouseLeftButtonUp += (s, e) =>
             {
                 if (!IsEnabled)
@@ -469,7 +478,7 @@ namespace DiscordUnblocker.Glass
             if (value == on && animate)
                 return;
             on = value;
-            double x = on ? 18 : 0;
+            double x = on ? 14 : 0;
             if (!animate || GlassTheme.ReduceMotion)
             {
                 move.BeginAnimation(TranslateTransform.XProperty, null);
@@ -599,8 +608,8 @@ namespace DiscordUnblocker.Glass
         public Grid AddRow(UIElement left, UIElement right = null, double minHeight = 46)
         {
             if (rows.Children.Count > 0)
-                rows.Children.Add(new Border { Height = 1, Background = GlassTheme.Separator, Margin = new Thickness(16, 0, 0, 0) });
-            var g = new Grid { MinHeight = minHeight, Margin = new Thickness(16, 6, 14, 6) };
+                rows.Children.Add(new Border { Height = 1, Background = GlassTheme.Separator, Margin = new Thickness(12, 0, 0, 0) });
+            var g = new Grid { MinHeight = Math.Round(minHeight * 0.76), Margin = new Thickness(12, 4, 10, 4) }; // 46 -> 35
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             if (left != null)

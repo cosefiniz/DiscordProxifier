@@ -53,7 +53,7 @@ namespace DiscordUnblocker.Glass
             Foreground = GlassTheme.Text;
 
             // Title row
-            titleRow = new Grid { Height = 48, Background = Brushes.Transparent, Margin = new Thickness(18, 0, 12, 0) };
+            titleRow = new Grid { Height = 40, Background = Brushes.Transparent, Margin = new Thickness(14, 0, 10, 0) };
             titleRow.MouseLeftButtonDown += (s, e) =>
             {
                 if (e.ButtonState == MouseButtonState.Pressed && e.ClickCount == 1)
@@ -66,7 +66,7 @@ namespace DiscordUnblocker.Glass
                 }
             };
             if (showLogo && LogoImage != null)
-                TitleLeft.Children.Add(new Image { Source = LogoImage, Width = 22, Height = 22, Margin = new Thickness(0, 0, 10, 0) });
+                TitleLeft.Children.Add(new Image { Source = LogoImage, Width = 18, Height = 18, Margin = new Thickness(0, 0, 8, 0) });
             TitleBlock = G.Text(title, TextStyle.Headline);
             TitleLeft.Children.Add(TitleBlock);
             titleRow.Children.Add(TitleLeft);
@@ -80,11 +80,11 @@ namespace DiscordUnblocker.Glass
 
             frame.Children.Add(BackdropLayer);
             frame.Children.Add(stack);
-            frame.SizeChanged += (s, e) => frame.Clip = new RectangleGeometry(new Rect(0, 0, frame.ActualWidth, frame.ActualHeight), 19, 19);
+            frame.SizeChanged += (s, e) => frame.Clip = new RectangleGeometry(new Rect(0, 0, frame.ActualWidth, frame.ActualHeight), 13, 13);
 
             outer = new Border
             {
-                CornerRadius = new CornerRadius(20),
+                CornerRadius = new CornerRadius(14),
                 BorderThickness = new Thickness(1),
                 BorderBrush = GlassTheme.WindowRim,
                 Child = frame,
@@ -165,7 +165,7 @@ namespace DiscordUnblocker.Glass
         // Round glass button in the title row (added right to left: the first one is outermost).
         public GlassButton AddTitleButton(string glyph, string tooltip, Action click)
         {
-            var b = new GlassButton(null, ButtonKind.Icon, glyph, 28) { Margin = new Thickness(6, 0, 0, 0), ToolTip = tooltip };
+            var b = new GlassButton(null, ButtonKind.Icon, glyph, 28) { Margin = new Thickness(5, 0, 0, 0), ToolTip = tooltip };
             b.Click += () => click?.Invoke();
             TitleButtons.Children.Insert(0, b);
             return b;

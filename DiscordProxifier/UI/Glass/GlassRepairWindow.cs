@@ -81,7 +81,7 @@ namespace DiscordUnblocker.Glass
         readonly TextBlock summaryIcon, summaryText, intro, reportStatus;
         readonly GlassButton report, close;
 
-        public GlassRepairWindow(AppController app) : base(440, false, L.T("repair.title"))
+        public GlassRepairWindow(AppController app) : base(400, false, L.T("repair.title"))
         {
             this.app = app;
             ShowInTaskbar = false;

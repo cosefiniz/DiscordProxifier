@@ -185,7 +185,7 @@ namespace DiscordUnblocker.Glass
         public bool Result { get; private set; }
         readonly GlassButton ok, cancel;
 
-        public GlassAlert(string title, string body, string okText, string cancelText) : base(312, false, title ?? "Discord Proxifier")
+        public GlassAlert(string title, string body, string okText, string cancelText) : base(284, false, title ?? "Discord Proxifier")
         {
             ShowInTaskbar = false;
             TitleRow.Visibility = Visibility.Collapsed;

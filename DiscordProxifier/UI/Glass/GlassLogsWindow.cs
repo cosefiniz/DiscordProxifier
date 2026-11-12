@@ -31,7 +31,7 @@ namespace DiscordUnblocker.Glass
         int flushQueued, lines;
         bool copied;
 
-        public GlassLogsWindow(Logger logger) : base(640, false, L.T("logs.title"))
+        public GlassLogsWindow(Logger logger) : base(600, false, L.T("logs.title"))
         {
             this.logger = logger;
             CloseOnEscape = true;
