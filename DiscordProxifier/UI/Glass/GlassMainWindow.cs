@@ -192,9 +192,10 @@ namespace DiscordUnblocker.Glass
             tools.Children.Add(settingsButton);
             content.Children.Add(new GlassPane(28) { Child = tools, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14, 0, 0) });
 
-            // ---- notes: a layer over everything, lifted over the title row ----
-            overlay = new Grid { RenderTransform = new TranslateTransform(0, -40) };
-            toast = new GlassToast { Margin = new Thickness(12, 6, 12, 0) };
+            // ---- notes: a layer over the content ----
+            // Below the title row, so the window can still be dragged while a note is showing.
+            overlay = new Grid();
+            toast = new GlassToast { Margin = new Thickness(12, 4, 12, 0) };
             overlay.Children.Add(toast);
             var root = new Grid();
             root.Children.Add(content);
