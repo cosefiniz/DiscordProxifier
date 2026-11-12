@@ -43,6 +43,7 @@ namespace DiscordUnblocker
     {
         bool WindowVisible { get; }      // shown (possibly minimized)
         bool IsShownToUser { get; }      // shown and not minimized
+        bool IsInFront { get; }          // the window is the active one (in-app toasts are seen)
         AppError Card { get; }           // the error/info card on screen, null if none
         void ShowCard(AppError e);
         // Hides the card. notify = true: treat it as closed (the view then calls
@@ -81,6 +82,8 @@ namespace DiscordUnblocker
         IAppView view;
         SynchronizationContext ui;
         TrayIcon tray;
+        Notifier notifier;
+        readonly List<DateTime> reconnects = new List<DateTime>();
 
         ManifestFile pendingUpdate;
         string updateDismissedFor; // the user closed the card for this version: don't show it again
@@ -92,6 +95,8 @@ namespace DiscordUnblocker
 
         // Set by Program when this process was started by a self-update.
         public bool JustUpdated { get; set; }
+        // Set by Program when started with Windows (--tray): routine notes stay quiet for a while.
+        public bool StartedHidden { get; set; }
         public List<DiscordClient> Clients { get; private set; } = new List<DiscordClient>();
         public DiscordClient Selected { get; private set; }
         public ClientState ClientState { get; private set; } = ClientState.Stopped;
@@ -123,7 +128,7 @@ namespace DiscordUnblocker
             Logger = logger;
             Mode = ProxyModes.Parse(cfg.Mode);
             Proxy = new ProxyManager(logger, AppSetup.DataDir);
-            Proxy.FellBackToTor += () => Post(() => Notify(NoteKind.Warning, L.T("toast.fallback"), null));
+            Proxy.FellBackToTor += () => Post(() => Notify(NoteKind.Warning, L.T("toast.fallback"), null, NoteGroup.Connection));
             Discord = new DiscordClients(logger, AppSetup.DataDir);
             Updater = new Updater(logger, AppSetup.DataDir);
         }
@@ -136,6 +141,16 @@ namespace DiscordUnblocker
             view = v;
             ui = SynchronizationContext.Current;
             tray = new TrayIcon(this);
+            try
+            {
+                notifier = new Notifier(Config, new Glass.BannerStack(), Logger);
+                if (StartedHidden)
+                    notifier.QuietFor(TimeSpan.FromMinutes(2));
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("Notifications fall back to the tray: " + ex.Message, LogType.WARNING);
+            }
             Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
             System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += OnNetworkChanged;
             L.Changed += () => tray.ApplyTexts();
@@ -169,7 +184,7 @@ namespace DiscordUnblocker
             Task connecting = Config.AutoConnect && missing.Count == 0 ? Connect() : null;
             Logger.Log($"Startup ready in {clock.ElapsedMilliseconds} ms");
             if (JustUpdated)
-                Notify(NoteKind.Success, L.F("toast.updated", AppSetup.AppVersion), L.T("toast.updated.sub"));
+                Notify(NoteKind.Success, L.F("toast.updated", AppSetup.AppVersion), L.T("toast.updated.sub"), NoteGroup.Update);
 
             await CheckUpdatesAsync(missing);
             if (connecting != null)
@@ -192,6 +207,7 @@ namespace DiscordUnblocker
             if (!updateChecking && DateTime.Now >= nextUpdateCheck)
                 _ = PeriodicUpdateCheck();
             ShowPendingUpdate();
+            notifier?.Tick();
         }
 
         // The window is closing: stop everything (the app ends with it).
@@ -205,6 +221,7 @@ namespace DiscordUnblocker
                 Proxy.StopNow();
                 tray?.Hide();
             }
+            notifier?.CloseAll();
         }
 
         public void Exit()
@@ -212,6 +229,7 @@ namespace DiscordUnblocker
             exiting = true;
             Proxy.StopNow();
             tray?.Hide();
+            notifier?.CloseAll();
             view.Shutdown();
         }
 
@@ -246,6 +264,7 @@ namespace DiscordUnblocker
                 exiting = true;
                 Proxy.StopNow();
                 tray?.Hide();
+                notifier?.CloseAll();
                 Process.Start(psi);
             }
             catch (Exception ex)
@@ -313,11 +332,11 @@ namespace DiscordUnblocker
                 ShowPendingUpdate(); // now, or as soon as the error card is gone
             }
             else if (Updater.IsNewer(m.AppVersion, AppSetup.AppVersion))
-                Notify(NoteKind.Info, L.F("toast.update.app", m.AppVersion), L.T("toast.update.sub"));
+                Notify(NoteKind.Info, L.F("toast.update.app", m.AppVersion), L.T("toast.update.sub"), NoteGroup.Update);
             else if (torUpdate && torUpdateNotified != m.Get("Tor.zip")?.Version)
             {
                 torUpdateNotified = m.Get("Tor.zip")?.Version;
-                Notify(NoteKind.Info, L.T("toast.update.tor"), L.T("toast.update.sub"));
+                Notify(NoteKind.Info, L.T("toast.update.tor"), L.T("toast.update.sub"), NoteGroup.Update);
             }
             else if (dllUpdated)
                 Notify(NoteKind.Info, L.F("toast.dll.updated", Updater.InstalledDllVersion), null);
@@ -380,7 +399,7 @@ namespace DiscordUnblocker
         // running version keeps working and the download page opens instead.
         async Task InstallUpdateAsync(ManifestFile f)
         {
-            Notify(NoteKind.Info, L.T("toast.updating"), L.F("UPDATE.t", f.Version));
+            Notify(NoteKind.Info, L.T("toast.updating"), L.F("UPDATE.t", f.Version), NoteGroup.Update);
             string newExe = await Updater.DownloadAppAsync(f);
             if (newExe != null)
             {
@@ -390,13 +409,14 @@ namespace DiscordUnblocker
                 if (Updater.SwapAndRestart(newExe, wasHidden))
                 {
                     tray?.Hide();
+                    notifier?.CloseAll();
                     view.Shutdown();
                     return;
                 }
                 exiting = false;
                 await Connect();
             }
-            Notify(NoteKind.Error, L.T("update.install.failed"), L.T("update.install.failed.sub"));
+            Notify(NoteKind.Error, L.T("update.install.failed"), L.T("update.install.failed.sub"), NoteGroup.Update);
             OpenUrl(UpdateSource.ReleasesPage);
         }
 
@@ -609,7 +629,7 @@ namespace DiscordUnblocker
                 if (Proxy.ActiveMode == ProxyMode.Tor && (r.Status == 403 || r.Status == 429))
                 {
                     if (await Proxy.NewCircuitAsync())
-                        Notify(NoteKind.Info, L.T("toast.newcircuit"), L.T("toast.newcircuit.sub"));
+                        Notify(NoteKind.Info, L.T("toast.newcircuit"), L.T("toast.newcircuit.sub"), NoteGroup.Connection);
                     return;
                 }
                 if (triggered || ++healthFails >= 2)
@@ -741,27 +761,71 @@ namespace DiscordUnblocker
             tray?.Refresh(Status);
         }
 
-        public void Notify(NoteKind kind, string title, string sub)
+        // In the window when the user is looking at it; otherwise the app's own notification
+        // (Liquid Glass banner, see Notifier), or the tray balloon if banners are unavailable.
+        public void Notify(NoteKind kind, string title, string sub, NoteGroup group = NoteGroup.General)
         {
             if (exiting)
                 return;
-            if (view.IsShownToUser)
+            if (view.IsShownToUser && view.IsInFront)
+            {
                 view.ShowToast(kind, title, sub);
-            else
-                tray?.Balloon(3000, title, sub, kind);
+                return;
+            }
+            Post(new Note { Kind = kind, Group = group, Title = title, Sub = sub });
+        }
+
+        void Post(Note n)
+        {
+            n.Open = n.Open ?? ShowFromTray;
+            if (notifier != null)
+                notifier.Post(n);
+            else if (n.Important || view.IsShownToUser)
+                tray?.Balloon(4000, n.Title, n.Sub, n.Kind);
         }
 
         void ShowError(AppError e, bool balloon = true)
         {
             view.ShowCard(e);
             view.RefreshStatus();
-            if (balloon && !view.IsShownToUser)
+            if (!balloon || (view.IsShownToUser && view.IsInFront))
+                return;
+            var n = new Note
             {
-                if (e.IsInfo)
-                    tray?.Balloon(5000, e.Title, e.Description, NoteKind.Info);
-                else
-                    tray?.Balloon(5000, e.Code + " · " + e.Title, e.Description, NoteKind.Error);
+                Kind = e.IsInfo ? NoteKind.Info : NoteKind.Error,
+                Group = e.Code == "UPDATE" ? NoteGroup.Update : NoteGroup.Problem,
+                Title = e.IsInfo ? e.Title : e.Code + " · " + e.Title,
+                Sub = e.Description,
+            };
+            ErrorAction first = e.Actions.FirstOrDefault();
+            if (e.Code == "UPDATE")
+            {
+                n.Actions.Add(new NoteAction { Label = ActionLabel(ErrorAction.InstallUpdate), Primary = true, Run = () => RunAction(ErrorAction.InstallUpdate) });
+                n.Actions.Add(new NoteAction { Label = ActionLabel(ErrorAction.ReleaseNotes), Run = () => RunAction(ErrorAction.ReleaseNotes) });
             }
+            else
+            {
+                if (e.Actions.Length > 0 && !OpensWindow(first))
+                    n.Actions.Add(new NoteAction { Label = ActionLabel(first), Primary = true, Run = () => RunAction(first) });
+                n.Actions.Add(new NoteAction { Label = L.T("note.open"), Primary = n.Actions.Count == 0, Run = () => { ShowFromTray(); return Task.CompletedTask; } });
+            }
+            Post(n);
+        }
+
+        // Actions that open a dialog need the window in front first.
+        static bool OpensWindow(ErrorAction a)
+        {
+            return a == ErrorAction.OpenSettings || a == ErrorAction.AddBridges || a == ErrorAction.ChangeEndpoint
+                || a == ErrorAction.BrowseDiscord || a == ErrorAction.Repair || a == ErrorAction.OpenLogs;
+        }
+
+        // Settings → Notifications → Try.
+        public void ShowSampleNote()
+        {
+            var n = new Note { Kind = NoteKind.Success, Group = NoteGroup.General, Title = L.T("notify.test.t"), Sub = L.T("notify.test.d") };
+            n.Actions.Add(new NoteAction { Label = L.T("note.open"), Primary = true, Run = () => { ShowFromTray(); return Task.CompletedTask; } });
+            n.Open = ShowFromTray;
+            notifier?.ShowSample(n);
         }
 
         // The view calls this after a card was closed (by the user, or by an action that resolved it).
@@ -817,7 +881,7 @@ namespace DiscordUnblocker
                 if (!exiting)
                 {
                     view.RefreshStatus();
-                    Notify(NoteKind.Info, L.T("toast.disconnected"), null);
+                    Notify(NoteKind.Info, L.T("toast.disconnected"), null, NoteGroup.Connection);
                 }
                 return;
             }
@@ -894,13 +958,19 @@ namespace DiscordUnblocker
             {
                 string m = ProxyModes.Display(Mode);
                 if (reconnectReason != null)
-                    Notify(NoteKind.Info, L.F("toast.reconnected", m), L.T(reconnectReason));
+                {
+                    // A flaky network can reconnect several times: one note that counts them.
+                    reconnects.RemoveAll(t => DateTime.Now - t > TimeSpan.FromMinutes(10));
+                    reconnects.Add(DateTime.Now);
+                    string title = reconnects.Count > 1 ? L.F("note.reconnected.n", reconnects.Count, m) : L.F("toast.reconnected", m);
+                    Notify(NoteKind.Info, title, L.T(reconnectReason), NoteGroup.Connection);
+                }
                 else if (moved && Config.AutoRoute)
-                    Notify(NoteKind.Info, L.F("toast.auto.picked", m), L.T("toast.auto.picked.sub"));
+                    Notify(NoteKind.Info, L.F("toast.auto.picked", m), L.T("toast.auto.picked.sub"), NoteGroup.Connection);
                 else if (switched)
-                    Notify(NoteKind.Success, L.F("toast.mode", m), L.T("toast.mode.sub"));
+                    Notify(NoteKind.Success, L.F("toast.mode", m), L.T("toast.mode.sub"), NoteGroup.Connection);
                 else
-                    Notify(NoteKind.Success, L.F("toast.connected", m), L.F("status.sub.connected", Proxy.LastLatencyMs, m));
+                    Notify(NoteKind.Success, L.F("toast.connected", m), L.F("status.sub.connected", Proxy.LastLatencyMs, m), NoteGroup.Connection);
             }
             else if (Proxy.LastError != null)
             {

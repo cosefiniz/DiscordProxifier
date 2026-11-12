@@ -21,13 +21,14 @@ namespace DiscordUnblocker.Glass
     {
         const double SidebarWidth = 188, ItemHeight = 30, ItemGap = 2;
 
-        static readonly string[] Ids = { "general", "appearance", "connection", "updates", "trouble" };
-        static readonly string[] Keys = { "settings.general", "look.appearance", "settings.connection", "settings.updates", "settings.trouble" };
-        static readonly string[] Glyphs = { "\uE713", "\uE790", "\uE774", "\uE896", "\uE90F" };
+        static readonly string[] Ids = { "general", "appearance", "notify", "connection", "updates", "trouble" };
+        static readonly string[] Keys = { "settings.general", "look.appearance", "settings.notify", "settings.connection", "settings.updates", "settings.trouble" };
+        static readonly string[] Glyphs = { "\uE713", "\uE790", "\uEA8F", "\uE774", "\uE896", "\uE90F" };
         static readonly Color[,] Tiles =
         {
             { Color.FromRgb(150, 152, 164), Color.FromRgb(112, 115, 130) },
             { Color.FromRgb(184, 132, 246), Color.FromRgb(140, 92, 222) },
+            { Color.FromRgb(255, 112, 112), Color.FromRgb(232, 64, 72) },
             { Color.FromRgb(84, 160, 252), Color.FromRgb(40, 114, 232) },
             { Color.FromRgb(70, 204, 130), Color.FromRgb(30, 160, 94) },
             { Color.FromRgb(252, 168, 70), Color.FromRgb(234, 122, 28) },
@@ -49,7 +50,7 @@ namespace DiscordUnblocker.Glass
         int current = -1;
 
         // controls
-        LiquidSegments language, style;
+        LiquidSegments language, style, notifyMode;
         GlassButton makeShortcut, torCheck, appCheck, repair, report, logs, folder;
         GlassField endpoint, bridges, httpPort, socksPort;
         TextBlock endpointNote, portNote, torTitle, appTitle, torStatus, appStatus, reportSub;
@@ -160,12 +161,13 @@ namespace DiscordUnblocker.Glass
 
             pages.Add(BuildGeneral());
             pages.Add(BuildAppearance());
+            pages.Add(BuildNotifications());
             pages.Add(BuildConnection());
             pages.Add(BuildUpdates());
             pages.Add(BuildTrouble());
 
             ApplyTexts();
-            Select(focus == "endpoint" || focus == "bridges" ? 2 : 0, false);
+            Select(focus == "endpoint" || focus == "bridges" ? Array.IndexOf(Ids, "connection") : focus == "notify" ? Array.IndexOf(Ids, "notify") : 0, false);
 
             L.Changed += ApplyTexts;
             GlassTheme.Changed += ThemeChanged;
@@ -275,6 +277,36 @@ namespace DiscordUnblocker.Glass
             }
             g.AddRow(grid);
             Note(page, "look.tone.hint");
+            return page;
+        }
+
+        // Notifications shown while the window isn't in front (the app's own banners).
+        FrameworkElement BuildNotifications()
+        {
+            var page = Page();
+            InsetGroup g = Group(page);
+            string[] modes = { "all", "important", "off" };
+            notifyMode = new LiquidSegments(new[] { L.T("notify.all"), L.T("notify.important"), L.T("notify.off") }, null, 32) { Width = 236 };
+            notifyMode.SetIndex(Math.Max(0, Array.IndexOf(modes, cfg.Notifications)), false);
+            notifyMode.UserChanged += i =>
+            {
+                cfg.Notifications = modes[i];
+                Save();
+            };
+            texts.Add(() => notifyMode.SetLabels(new[] { L.T("notify.all"), L.T("notify.important"), L.T("notify.off") }));
+            g.AddRow(Label("notify.mode", null), notifyMode);
+            Note(page, "notify.mode.hint");
+
+            g = Group(page);
+            ToggleRow(g, "notify.sound", "notify.sound.sub", cfg.NotificationSound, v => cfg.NotificationSound = v);
+            GlassButton test = SmallButton("notify.test", "\uEA8F");
+            test.Click += () =>
+            {
+                if (!preview)
+                    app.ShowSampleNote();
+            };
+            g.AddRow(Label("notify.test.row", null), test);
+            Note(page, "notify.busy.hint");
             return page;
         }
 
@@ -693,10 +725,10 @@ namespace DiscordUnblocker.Glass
             var w = new GlassSettingsWindow(app, null);
             int i = Array.IndexOf(Ids, state);
             if (state == "invalid")
-                i = 2;
+                i = Array.IndexOf(Ids, "connection");
             if (state == "checking")
             {
-                i = 3;
+                i = Array.IndexOf(Ids, "updates");
                 ShowStatus(w.torStatus, w.torSpin, L.T("update.checking"), true);
                 w.torCheck.IsEnabled = false;
                 ShowStatus(w.appStatus, w.appSpin, L.T("update.latest"), false);

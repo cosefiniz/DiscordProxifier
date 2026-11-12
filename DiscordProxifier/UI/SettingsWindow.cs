@@ -46,8 +46,9 @@ namespace DiscordUnblocker
         readonly Configuration cfg;
         readonly Logger logger;
 
-        readonly TextLine lLook;
-        readonly SegmentSwitch look;
+        readonly TextLine lLook, lNotify;
+        readonly SegmentSwitch look, notify;
+        readonly ToggleSwitch notifySound;
         readonly TextLine hGeneral, hWarp, hTor, hAdvanced, lLanguage, lEndpoint, hintEndpoint, lBridges, hintBridges, lHttp, lSocks, portError, endpointError, footer;
         readonly SegmentSwitch language;
         readonly ToggleSwitch startup, launchAfter, shortcuts, fallback;
@@ -98,6 +99,17 @@ namespace DiscordUnblocker
                     look.SetIndex(1, true);
             };
             Controls.Add(look);
+            lNotify = Muted();
+            string[] modes = { "all", "important", "off" };
+            notify = new SegmentSwitch { Labels = new[] { L.T("notify.all"), L.T("notify.important"), L.T("notify.off") }, Height = Theme.S(34) };
+            notify.SetIndex(Math.Max(0, Array.IndexOf(modes, cfg.Notifications)), false);
+            notify.UserChanged += i =>
+            {
+                cfg.Notifications = modes[i];
+                cfg.Save();
+            };
+            Controls.Add(notify);
+            notifySound = Toggle(cfg.NotificationSound, v => cfg.NotificationSound = v);
             startup = Toggle(cfg.OpenAtStartup, v => cfg.OpenAtStartup = v);
             launchAfter = Toggle(cfg.LaunchDiscordAfterConnect, v => cfg.LaunchDiscordAfterConnect = v);
             shortcuts = Toggle(cfg.AutoUpdateProxified, v => cfg.AutoUpdateProxified = v);
@@ -300,6 +312,10 @@ namespace DiscordUnblocker
             lLook.Text = L.T("look.style");
             look.Labels = new[] { "Liquid Glass", L.T("look.classic") };
             look.Invalidate();
+            lNotify.Text = L.T("settings.notify");
+            notify.Labels = new[] { L.T("notify.all"), L.T("notify.important"), L.T("notify.off") };
+            notify.Invalidate();
+            notifySound.Text = L.T("notify.sound");
             startup.Text = L.T("settings.startup");
             launchAfter.Text = L.T("settings.launchafter");
             shortcuts.Text = L.T("settings.shortcuts");
@@ -359,6 +375,11 @@ namespace DiscordUnblocker
             lLook.SetBounds(x, y + Theme.S(6), Theme.S(120), Theme.S(22));
             look.SetBounds(x + inner - Theme.S(210), y, Theme.S(210), Theme.S(34));
             y += Theme.S(44);
+            lNotify.SetBounds(x, y + Theme.S(6), Theme.S(150), Theme.S(22));
+            notify.SetBounds(x + inner - Theme.S(230), y, Theme.S(230), Theme.S(34));
+            y += Theme.S(44);
+            place(notifySound, Theme.S(26));
+            y += Theme.S(6);
             place(startup, Theme.S(26));
             y += Theme.S(6);
             place(launchAfter, Theme.S(26));

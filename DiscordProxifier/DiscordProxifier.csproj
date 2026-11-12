@@ -195,6 +195,7 @@
   <ItemGroup>
     <Compile Include="App\AppController.cs" />
     <Compile Include="App\TrayIcon.cs" />
+    <Compile Include="App\Notifier.cs" />
     <Compile Include="Core\AppSetup.cs" />
     <Compile Include="Core\Strings.Glass.cs" />
     <Compile Include="Core\Configuration.cs" />
@@ -224,6 +225,7 @@
     </Compile>
     <Compile Include="UI\Theme.cs" />
     <Compile Include="UI\Glass\GlassApp.cs" />
+    <Compile Include="UI\Glass\GlassBanner.cs" />
     <Compile Include="UI\Glass\GlassCard.cs" />
     <Compile Include="UI\Glass\GlassControls.cs" />
     <Compile Include="UI\Glass\GlassDialog.cs" />
@@ -242,6 +244,8 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Assets\logo.png" />
     <EmbeddedResource Include="Assets\Shaders\Refraction.ps" />
+    <EmbeddedResource Include="Assets\Sounds\note.wav" />
+    <EmbeddedResource Include="Assets\Sounds\alert.wav" />
     <None Include="Assets\Shaders\Refraction.fx" />
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>

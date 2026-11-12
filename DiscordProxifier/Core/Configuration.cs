@@ -20,8 +20,12 @@ namespace DiscordUnblocker
 
         // Look: "glass" (Liquid Glass, WPF) or "classic" (the 2.x WinForms windows).
         public string Appearance { get; set; } = "glass";
-        // Liquid Glass background tone: "light", "mixed" or "dark".
-        public string GlassTone { get; set; } = "dark";
+        // Liquid Glass background tone: "light" (first start), "mixed" or "dark".
+        public string GlassTone { get; set; } = "light";
+
+        // Notifications while the window isn't in front: "all", "important" or "off"; with sound.
+        public string Notifications { get; set; } = "all";
+        public bool NotificationSound { get; set; } = true;
 
         // Proxy chain
         public string Mode { get; set; } = "Tor";
@@ -58,8 +62,10 @@ namespace DiscordUnblocker
                 c.Language = "en";
             if (c.Appearance != "classic")
                 c.Appearance = "glass";
-            if (c.GlassTone != "light" && c.GlassTone != "mixed")
-                c.GlassTone = "dark";
+            if (c.GlassTone != "mixed" && c.GlassTone != "dark")
+                c.GlassTone = "light";
+            if (c.Notifications != "important" && c.Notifications != "off")
+                c.Notifications = "all";
             c.CustomClientRoots = c.CustomClientRoots ?? new string[0];
             return c;
         }

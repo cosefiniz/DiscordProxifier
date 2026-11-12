@@ -182,6 +182,7 @@ namespace DiscordUnblocker
 
         public bool WindowVisible => Visible;
         public bool IsShownToUser => Visible && WindowState != FormWindowState.Minimized;
+        public bool IsInFront => Form.ActiveForm == this;
         public AppError Card => errorCard.Visible ? errorCard.Error : null;
 
         public void ShowCard(AppError e)

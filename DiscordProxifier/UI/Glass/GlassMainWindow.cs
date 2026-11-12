@@ -327,6 +327,7 @@ namespace DiscordUnblocker.Glass
 
         public bool WindowVisible => IsVisible;
         public bool IsShownToUser => IsVisible && WindowState != WindowState.Minimized;
+        public bool IsInFront => IsActive;
         public AppError Card => card.Error;
 
         public void ShowCard(AppError e)

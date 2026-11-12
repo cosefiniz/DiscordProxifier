@@ -66,9 +66,14 @@ namespace DiscordUnblocker
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (s, e) => logger.Log("Unexpected error: " + e.Exception, LogType.ERROR);
             bool updated = args.Contains("--updated");
-            var app = new AppController(cfg, logger) { JustUpdated = updated };
+            var app = new AppController(cfg, logger) { JustUpdated = updated, StartedHidden = startHidden };
             if (cfg.Appearance == "classic")
+            {
+                // Notifications are Liquid Glass banners in both looks; dark matches the classic windows.
+                Glass.GlassTheme.ReadSystemSettings();
+                Glass.GlassTheme.Apply(Glass.GlassTone.Dark, false);
                 Application.Run(new MainWindow(app, startHidden));
+            }
             else
                 Glass.GlassApp.Run(app, startHidden);
         }
